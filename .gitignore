@@ -1,0 +1,15 @@
+.gradle/
+.kotlin/
+local.properties
+**/build/
+*.iml
+.idea/
+
+# Android signing keys and local signing configuration
+*.jks
+*.keystore
+*.p12
+*.pfx
+key.properties
+keystore.properties
+signing.properties
