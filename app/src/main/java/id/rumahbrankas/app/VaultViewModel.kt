@@ -20,21 +20,36 @@ class VaultViewModel(val repository: VaultRepository) : ViewModel() {
     val locking = mutableStateOf(false)
     val keyGeneration = mutableStateOf(0)
     val isForeground = mutableStateOf(true)
+    /** True while the system document picker is covering this activity, so leaving must not remove the task. */
+    val externalPickerOpen = mutableStateOf(false)
+    /** True while the biometric prompt is showing. That dialog must not end the task. */
+    val systemPromptOpen = mutableStateOf(false)
     val entries = mutableStateListOf<VaultEntry>()
     val message = mutableStateOf("")
     val currentOperation = mutableStateOf<String?>(null)
     val vaultOperations = Mutex()
 
-    override fun onCleared() {
+    /** Drops the unlocked session immediately, before the activity is destroyed. */
+    fun discardSession() {
+        keyGeneration.value += 1
         master.value?.fill(0)
         pendingCreation.value?.masterKey?.fill(0)
         biometricSetupKey.value?.fill(0)
         master.value = null
         pendingCreation.value = null
+        recoveryToShow.value = null
         biometricSetupKey.value = null
+        biometricSetup.value = false
+        credentialBusy.value = false
+        locking.value = false
         currentOperation.value = null
+        message.value = ""
         entries.clear()
         repository.clearPreviewCache()
+    }
+
+    override fun onCleared() {
+        discardSession()
     }
 
     class Factory(private val repository: VaultRepository) : ViewModelProvider.Factory {

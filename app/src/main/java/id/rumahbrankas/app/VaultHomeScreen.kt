@@ -22,6 +22,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -34,6 +43,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
@@ -67,18 +77,42 @@ internal fun VaultHome(
     var deleting by remember { mutableStateOf<VaultEntry?>(null) }
     var showSecurity by remember { mutableStateOf(false) }
     val filtered = entries.filter { it.title.contains(query.trim(), ignoreCase = true) }
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val searchBounds = remember { mutableStateOf<Rect?>(null) }
+    val rootCoordinates = remember { mutableStateOf<LayoutCoordinates?>(null) }
 
-    Column(Modifier.fillMaxSize().padding(WindowInsets.statusBars.asPaddingValues())) {
+    Column(
+        Modifier.fillMaxSize().padding(WindowInsets.statusBars.asPaddingValues())
+            .onGloballyPositioned { rootCoordinates.value = it }
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val down = event.changes.firstOrNull { it.changedToDownIgnoreConsumed() } ?: continue
+                        val root = rootCoordinates.value
+                        val bounds = searchBounds.value
+                        val insideSearch = root != null && root.isAttached && bounds != null &&
+                            bounds.contains(root.localToWindow(down.position))
+                        if (!insideSearch) {
+                            focusManager.clearFocus(force = true)
+                            keyboard?.hide()
+                        }
+                    }
+                }
+            },
+    ) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             BrandMark()
             Row {
                 IconButton(onClick = { showSecurity = true }) { Icon(Icons.Outlined.Fingerprint, stringResource(R.string.action_security_settings), tint = Gold) }
                 IconButton(onClick = onLock) { Icon(Icons.Outlined.Lock, stringResource(R.string.action_lock_vault), tint = Paper) }
+                SettingsGear()
             }
         }
         Column(Modifier.weight(1f)) {
             Column(Modifier.padding(horizontal = 24.dp)) {
-                Text(SimpleDateFormat("EEEE, d MMMM", Locale("id", "ID")).format(Date()).uppercase(), color = Gold, fontSize = 10.sp, letterSpacing = 2.sp, fontWeight = FontWeight.SemiBold)
+                Text(vaultDate("EEEE, d MMMM", System.currentTimeMillis()).uppercase(), color = Gold, fontSize = 10.sp, letterSpacing = 2.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(13.dp))
                 Text(stringResource(R.string.home_headline), color = Paper, fontSize = 32.sp, lineHeight = 38.sp, fontFamily = FontFamily.Serif)
                 Spacer(Modifier.height(22.dp))
@@ -89,7 +123,9 @@ internal fun VaultHome(
                 }
                 Spacer(Modifier.height(18.dp))
                 OutlinedTextField(
-                    value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    value = query, onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth().onGloballyPositioned { searchBounds.value = it.boundsInWindow() },
+                    singleLine = true,
                     placeholder = { Text(stringResource(R.string.search_vault), color = Muted) },
                     leadingIcon = { Icon(Icons.Outlined.Search, stringResource(R.string.search_items), tint = Muted) },
                     shape = RoundedCornerShape(15.dp),
@@ -215,7 +251,7 @@ private fun EntryCard(entry: VaultEntry, onClick: () -> Unit) {
             Spacer(Modifier.height(6.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(stringResource(if (entry.isNote) R.string.file_note else if (entry.isVideo) R.string.file_video else R.string.file_photo), color = Gold, fontSize = 10.sp)
-                Text(SimpleDateFormat("d MMM", Locale("id", "ID")).format(Date(entry.createdAt)), color = Muted, fontSize = 11.sp)
+                Text(vaultDate("d MMM", entry.createdAt), color = Muted, fontSize = 11.sp)
             }
         }
     }
@@ -228,6 +264,13 @@ private fun EmptyState(isEmptyVault: Boolean) {
         Spacer(Modifier.height(15.dp)); Text(stringResource(if (isEmptyVault) R.string.empty_title else R.string.no_match_title), color = Paper, fontFamily = FontFamily.Serif, fontSize = 20.sp)
         Spacer(Modifier.height(6.dp)); Text(stringResource(if (isEmptyVault) R.string.empty_body else R.string.no_match_body), color = Muted, fontSize = 13.sp, lineHeight = 20.sp, textAlign = TextAlign.Center)
     }
+}
+
+@Composable
+private fun vaultDate(pattern: String, timeMillis: Long): String {
+    val locales = LocalConfiguration.current.locales
+    val locale = if (locales.isEmpty) Locale.getDefault() else locales[0]
+    return SimpleDateFormat(pattern, locale).format(Date(timeMillis))
 }
 
 @Composable

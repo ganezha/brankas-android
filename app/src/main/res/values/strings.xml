@@ -126,4 +126,14 @@
     <string name="error_storage_unavailable">Penyimpanan tidak dapat dibaca atau ditulis.</string>
     <string name="error_vault_metadata">Metadata atau indeks Brankas rusak atau tidak lengkap.</string>
     <string name="error_generic">%1$s belum berhasil. Detail aman telah dicatat di log perangkat.</string>
+    <string name="settings_open">Pengaturan</string>
+    <string name="settings_heading">Pengaturan</string>
+    <string name="settings_language">Bahasa</string>
+    <string name="settings_about">Tentang</string>
+    <string name="language_indonesia">Indonesia</string>
+    <string name="language_english">English</string>
+    <string name="about_version">Versi %1$s</string>
+    <string name="about_summary">Foto, video, dan catatan tersimpan hanya di perangkat ini. Tidak ada akun dan tidak ada awan.</string>
+    <string name="about_recovery">Kode pemulihan ditampilkan sekali, saat brankas dibuat. Simpan di luar ponsel.</string>
+    <string name="default_note_title">Catatan baru</string>
 </resources>

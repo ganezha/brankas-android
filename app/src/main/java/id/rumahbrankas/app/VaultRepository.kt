@@ -158,9 +158,12 @@ class DefaultVaultRepository internal constructor(
     }
 
     override fun addNote(master: ByteArray, title: String, text: String): VaultEntry {
+        val resolvedTitle = title.trim().ifBlank {
+            appContext?.getString(R.string.default_note_title) ?: "Catatan baru"
+        }
         val item = VaultEntry(
             java.util.UUID.randomUUID().toString(),
-            title.trim().ifBlank { "Catatan baru" },
+            resolvedTitle,
             "text/plain",
             System.currentTimeMillis(),
         )
