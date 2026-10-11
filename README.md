@@ -1,4 +1,5 @@
 # Brankas
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 
 A local-first Android vault for private photos, videos, and notes. The interface uses a restrained charcoal and warm-gold palette, with a custom safe icon, PIN access, optional biometric unlock, and a recovery code.
 
