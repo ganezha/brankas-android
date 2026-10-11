@@ -83,7 +83,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -150,16 +155,32 @@ internal fun UnlockScreen(
         }
     }
     BackHandler(enabled = showRecovery && !busy, onBack = closeRecovery)
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 28.dp)
+    val gaze = remember { mutableStateOf<Offset?>(null) }
+    val rootCoordinates = remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+    val typedCharacters = if (showRecovery) code.length + newSecret.length else secret.length
+    Column(Modifier.fillMaxSize()
+        .onGloballyPositioned { rootCoordinates.value = it }
+        .pointerInput(Unit) {
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    val root = rootCoordinates.value
+                    val pressed = event.changes.firstOrNull { it.pressed }
+                    gaze.value = if (root != null && root.isAttached && pressed != null) {
+                        root.localToWindow(pressed.position)
+                    } else {
+                        null
+                    }
+                }
+            }
+        }
+        .verticalScroll(rememberScrollState()).padding(horizontal = 28.dp)
         .padding(WindowInsets.statusBars.asPaddingValues()).padding(top = 8.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.SpaceBetween) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { SettingsGear() }
-            BrandMark()
-            Spacer(Modifier.height(82.dp))
-            Box(Modifier.size(94.dp).clip(CircleShape).background(PanelRaised), contentAlignment = Alignment.Center) {
-                Icon(Icons.Outlined.Shield, null, tint = Gold, modifier = Modifier.size(42.dp))
-            }
+            Spacer(Modifier.height(28.dp))
+            VaultEyeMark(gaze.value, typedCharacters, Modifier.size(176.dp))
             Spacer(Modifier.height(25.dp))
             Text(stringResource(R.string.unlock_title), color = Paper, fontSize = 32.sp, fontFamily = FontFamily.Serif)
             Spacer(Modifier.height(8.dp))

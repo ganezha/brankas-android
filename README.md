@@ -41,3 +41,7 @@ The recovery code is shown once during setup. Keep it somewhere safe outside the
 ## Current scope
 
 This is a local-only first release. It has no cloud sync, account, analytics, or server. It includes user-initiated encrypted backup export and restore; production signing is not included.
+
+## License
+
+This project is licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE) for the complete license text.
