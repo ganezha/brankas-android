@@ -219,15 +219,120 @@ class VaultSecurityTest {
         }
     }
 
+    @Test
+    fun encryptedBackupRoundTripRestoresNoteAndMediaWithoutPlaintext() {
+        val source = repository("backup-source")
+        val created = createVault(source)
+        var restoredKey = ByteArray(0)
+        try {
+            val noteBody = "kunci-rahasia-unik-brankas-991"
+            val note = source.addNote(created.masterKey, "Judul rahasia cadangan", noteBody)
+            val media = byteArrayOf(9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 11, 22, 33, 44, 55, 66, 77, 88, 99)
+            val imported = source.importAndMove(created.masterKey, FakeDocuments(media), SOURCE)
+            File(vaultDirectory("backup-source"), "bukan-cadangan.txt").writeText("JANGAN-MASUK-CADANGAN")
+            val archive = ByteArrayOutputStream()
+            source.exportBackupTo(archive)
+            val bytes = archive.toByteArray()
+            assertFalse(containsSequence(bytes, noteBody.toByteArray(Charsets.UTF_8)))
+            assertFalse(containsSequence(bytes, "Judul rahasia cadangan".toByteArray(Charsets.UTF_8)))
+            assertFalse(containsSequence(bytes, "JANGAN-MASUK-CADANGAN".toByteArray(Charsets.UTF_8)))
+            assertFalse(containsSequence(bytes, media))
+            assertArrayEquals("BRANKASBK1".toByteArray(Charsets.US_ASCII), bytes.copyOf(10))
+            assertEquals(noteBody, source.readNote(created.masterKey, note))
+
+            val destination = repository("backup-destination")
+            val previous = createVault(destination, "654321")
+            try {
+                destination.addNote(previous.masterKey, "Catatan lama", "harus hilang setelah pulih")
+            } finally {
+                previous.masterKey.fill(0)
+            }
+            destination.restoreBackupFrom(ByteArrayInputStream(bytes))
+            restoredKey = destination.unlock("123456".toCharArray())
+            val entries = destination.entries(restoredKey)
+            val restoredNote = entries.first { it.isNote }
+            assertEquals(note.title, restoredNote.title)
+            assertEquals(noteBody, destination.readNote(restoredKey, restoredNote))
+            val restoredMedia = entries.first { !it.isNote }
+            assertEquals(imported.entry.title, restoredMedia.title)
+            val clear = destination.decryptToCache(restoredKey, restoredMedia)
+            try {
+                assertArrayEquals(media, clear.readBytes())
+            } finally {
+                clear.delete()
+            }
+            assertFalse(File(vaultDirectory("backup-destination"), "bukan-cadangan.txt").exists())
+            assertThrows(Exception::class.java) { destination.unlock("654321".toCharArray()) }
+        } finally {
+            restoredKey.fill(0)
+            created.masterKey.fill(0)
+        }
+    }
+
+    @Test
+    fun tamperedOrTruncatedBackupDoesNotReplaceExistingVault() {
+        val source = repository("backup-tamper-source")
+        val created = createVault(source)
+        var destinationKey = ByteArray(0)
+        try {
+            source.addNote(created.masterKey, "Sumber", "isi sumber cadangan")
+            val archive = ByteArrayOutputStream()
+            source.exportBackupTo(archive)
+            val bytes = archive.toByteArray()
+            bytes[bytes.size / 2] = (bytes[bytes.size / 2].toInt() xor 0x5A).toByte()
+
+            val destination = repository("backup-tamper-destination")
+            val existing = createVault(destination, "654321")
+            val kept = destination.addNote(existing.masterKey, "Tetap ada", "catatan yang tidak boleh hilang")
+            existing.masterKey.fill(0)
+            assertThrows(BackupRejectedException::class.java) {
+                destination.restoreBackupFrom(ByteArrayInputStream(bytes))
+            }
+            assertThrows(BackupRejectedException::class.java) {
+                destination.restoreBackupFrom(ByteArrayInputStream(byteArrayOf(1, 2, 3, 4)))
+            }
+            destinationKey = destination.unlock("654321".toCharArray())
+            assertEquals(listOf(kept), destination.entries(destinationKey))
+            assertEquals("catatan yang tidak boleh hilang", destination.readNote(destinationKey, kept))
+            assertTrue(source.entries(created.masterKey).any { it.title == "Sumber" })
+        } finally {
+            destinationKey.fill(0)
+            created.masterKey.fill(0)
+        }
+    }
+
+    @Test
+    fun exportWithoutVaultFails() {
+        val repo = repository("backup-empty")
+        assertThrows(IllegalStateException::class.java) {
+            repo.exportBackupTo(ByteArrayOutputStream())
+        }
+    }
+
     private fun repository(name: String): DefaultVaultRepository {
         val files = temporaryFolder.newFolder(name)
         return DefaultVaultRepository(files, File(files, "cache").apply { mkdirs() })
     }
 
-    private fun createVault(repo: VaultRepository): CreatedVault {
-        val created = repo.create("123456".toCharArray(), "pin")
+    private fun createVault(repo: VaultRepository, pin: String = "123456"): CreatedVault {
+        val created = repo.create(pin.toCharArray(), "pin")
         repo.commitCreate(created)
         return created
+    }
+
+    private fun containsSequence(haystack: ByteArray, needle: ByteArray): Boolean {
+        if (needle.isEmpty() || needle.size > haystack.size) return false
+        for (start in 0..haystack.size - needle.size) {
+            var matches = true
+            for (index in needle.indices) {
+                if (haystack[start + index] != needle[index]) {
+                    matches = false
+                    break
+                }
+            }
+            if (matches) return true
+        }
+        return false
     }
 
     private fun vaultDirectory(name: String): File =

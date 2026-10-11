@@ -69,6 +69,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -99,7 +100,9 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.ViewModelProvider
 import androidx.compose.ui.viewinterop.AndroidView
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -126,6 +129,8 @@ internal fun BrankasApp(repo: VaultRepository, activity: FragmentActivity, viewM
     var credentialType by viewModel.credentialType
     var credentialBusy by viewModel.credentialBusy
     var locking by viewModel.locking
+    var lockComplete by viewModel.lockComplete
+    var previewCacheCleared by viewModel.previewCacheCleared
     var keyGeneration by viewModel.keyGeneration
     var isForeground by viewModel.isForeground
     val entries = viewModel.entries
@@ -134,6 +139,7 @@ internal fun BrankasApp(repo: VaultRepository, activity: FragmentActivity, viewM
     val context = LocalContext.current
     val vaultOperations = viewModel.vaultOperations
     var toast by viewModel.message
+    var notice by viewModel.notice
     var backgroundLockJob by remember { mutableStateOf<Job?>(null) }
 
     fun unlock(key: ByteArray) {
@@ -146,6 +152,7 @@ internal fun BrankasApp(repo: VaultRepository, activity: FragmentActivity, viewM
         master?.fill(0)
         master = key
         locking = false
+        lockComplete = false
         toast = ""
     }
 
@@ -160,6 +167,8 @@ internal fun BrankasApp(repo: VaultRepository, activity: FragmentActivity, viewM
     fun requestLock() {
         if (locking) return
         locking = true
+        lockComplete = false
+        previewCacheCleared = false
         keyGeneration += 1
         toast = context.getString(R.string.status_locking)
         scope.launch {
@@ -173,8 +182,13 @@ internal fun BrankasApp(repo: VaultRepository, activity: FragmentActivity, viewM
                 biometricSetupKey = null
                 biometricSetup = false
                 entries.clear()
-                repo.clearPreviewCache()
-                toast = ""
+                previewCacheCleared = runCatching {
+                    withContext(Dispatchers.IO) { repo.clearPreviewCache() }
+                }.getOrDefault(false)
+                lockComplete = true
+                toast = if (previewCacheCleared) "" else context.getString(R.string.status_lock_cache_warning)
+                delay(700L)
+                lockComplete = false
                 locking = false
             }
         }
@@ -234,6 +248,7 @@ internal fun BrankasApp(repo: VaultRepository, activity: FragmentActivity, viewM
         operation: String,
         key: ByteArray,
         expectedGeneration: Int = keyGeneration,
+        reportFailure: Boolean = true,
         action: suspend (ByteArray) -> Unit,
     ) {
         scope.launch {
@@ -250,7 +265,7 @@ internal fun BrankasApp(repo: VaultRepository, activity: FragmentActivity, viewM
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                toast = repo.messageForFailure(operation, error)
+                if (reportFailure) toast = repo.messageForFailure(operation, error)
             } finally {
                 currentOperation = null
                 key.fill(0)
@@ -268,6 +283,66 @@ internal fun BrankasApp(repo: VaultRepository, activity: FragmentActivity, viewM
         }
     }
 
+    val exportPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        viewModel.externalPickerOpen.value = false
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            vaultOperations.withLock {
+                notice = context.getString(R.string.backup_working)
+                try {
+                    withContext(Dispatchers.IO) { repo.exportBackup(uri.toString()) }
+                    notice = context.getString(R.string.backup_exported)
+                } catch (cancelled: CancellationException) {
+                    notice = ""
+                    throw cancelled
+                } catch (error: Exception) {
+                    notice = ""
+                    toast = repo.messageForFailure(context.getString(R.string.operation_export_backup), error)
+                }
+            }
+        }
+    }
+    val backupPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        viewModel.externalPickerOpen.value = false
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            vaultOperations.withLock {
+                notice = context.getString(R.string.backup_restoring)
+                try {
+                    withContext(Dispatchers.IO) { repo.restoreBackup(uri.toString()) }
+                    viewModel.discardSession()
+                    credentialType = runCatching { repo.credentialType() }.getOrDefault("pin")
+                    notice = context.getString(R.string.backup_restored)
+                } catch (cancelled: CancellationException) {
+                    notice = ""
+                    throw cancelled
+                } catch (error: Exception) {
+                    notice = ""
+                    toast = repo.messageForFailure(context.getString(R.string.operation_restore_backup), error)
+                }
+            }
+        }
+    }
+    fun startBackupExport() {
+        if (!repo.exists()) {
+            notice = context.getString(R.string.backup_empty)
+            return
+        }
+        launchExternalPicker { exportPicker.launch("brankas-backup.brankas") }
+    }
+    fun startBackupRestore() {
+        launchExternalPicker { backupPicker.launch(arrayOf("*/*")) }
+    }
+    LaunchedEffect(notice) {
+        val shown = notice
+        if (shown.isBlank()) return@LaunchedEffect
+        val working = context.getString(R.string.backup_working)
+        val restoring = context.getString(R.string.backup_restoring)
+        if (shown == working || shown == restoring) return@LaunchedEffect
+        delay(4_000)
+        if (notice == shown) notice = ""
+    }
+
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         viewModel.externalPickerOpen.value = false
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
@@ -277,18 +352,24 @@ internal fun BrankasApp(repo: VaultRepository, activity: FragmentActivity, viewM
             val imported = mutableListOf<ImportOutcome>()
             var failed = 0
             var firstFailure: String? = null
-            for (uri in uris) {
-                try {
-                    imported += withContext(Dispatchers.IO) {
-                        repo.importAndMove(operationKey, uri.toString())
+            viewModel.importProgress.value = ImportProgress(0, uris.size, 1)
+            try {
+                for ((index, uri) in uris.withIndex()) {
+                    viewModel.importProgress.value = ImportProgress(index, uris.size, index + 1)
+                    try {
+                        imported += withContext(Dispatchers.IO) {
+                            repo.importAndMove(operationKey, uri.toString())
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        failed++
+                        val message = repo.messageForFailure(context.getString(R.string.operation_import), error)
+                        if (firstFailure == null) firstFailure = message
                     }
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (error: Exception) {
-                    failed++
-                    val message = repo.messageForFailure(context.getString(R.string.operation_import), error)
-                    if (firstFailure == null) firstFailure = message
                 }
+            } finally {
+                viewModel.importProgress.value = null
             }
             entries.addAll(0, imported.map { it.entry })
             val sourceRetained = imported.count { !it.sourceRemoved }
@@ -325,9 +406,13 @@ internal fun BrankasApp(repo: VaultRepository, activity: FragmentActivity, viewM
     }
 
     Surface(Modifier.fillMaxSize(), color = Ink) {
+        CompositionLocalProvider(
+            LocalVaultBackup provides VaultBackupActions(::startBackupExport, ::startBackupRestore),
+        ) {
         Box(Modifier.fillMaxSize()) {
             val current = master
             when {
+                locking || lockComplete -> LockTransitionScreen(lockComplete, previewCacheCleared)
                 recoveryToShow != null && pendingCreation != null -> RecoveryScreen(
                     recoveryToShow!!,
                     toast,
@@ -363,6 +448,8 @@ internal fun BrankasApp(repo: VaultRepository, activity: FragmentActivity, viewM
                 )
                 current != null -> VaultHome(
                     repo, entries, toast,
+                    onDismissMessage = { shown -> if (toast == shown) toast = "" },
+                    importProgress = viewModel.importProgress.value,
                     onLock = { requestLock() },
                     onAddMedia = {
                         if (!locking) launchExternalPicker { picker.launch(arrayOf("image/*", "video/*")) }
@@ -445,13 +532,54 @@ internal fun BrankasApp(repo: VaultRepository, activity: FragmentActivity, viewM
                         val key = copiedKeyOrMessage()
                         if (key == null) onReady(null, null)
                         else launchWithKey(context.getString(R.string.operation_open_file), key) { operationKey ->
-                            if (item.isNote) {
-                                val body = withContext(Dispatchers.IO) { repo.readNote(operationKey, item) }
-                                onReady(null, body)
-                            } else {
-                                val file = withContext(Dispatchers.IO) { repo.decryptToCache(operationKey, item) }
-                                onReady(file, null)
+                            try {
+                                if (item.isNote) {
+                                    val body = withContext(Dispatchers.IO) { repo.readNote(operationKey, item) }
+                                    onReady(null, body)
+                                } else {
+                                    val file = withContext(Dispatchers.IO) { repo.decryptToCache(operationKey, item) }
+                                    onReady(file, null)
+                                }
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (error: Exception) {
+                                onReady(null, null)
+                                throw error
                             }
+                        }
+                    },
+                    onLoadThumbnail = { item, onReady ->
+                        val key = copiedKeyOrMessage()
+                        if (key == null) onReady(null)
+                        else launchWithKey(
+                            context.getString(R.string.operation_load_thumbnail), key, reportFailure = false,
+                        ) { operationKey ->
+                            val thumbnail = try {
+                                withContext(Dispatchers.IO) {
+                                    val clearFile = repo.decryptToCache(operationKey, item)
+                                    val readable = if (item.isVideo) videoFileForFrame(clearFile, item.mimeType) else clearFile
+                                    try {
+                                        if (item.isVideo) videoThumbnail(readable) else {
+                                            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                                            BitmapFactory.decodeFile(readable.absolutePath, bounds)
+                                            var sample = 1
+                                            while (bounds.outWidth / sample > 720 || bounds.outHeight / sample > 720) sample *= 2
+                                            BitmapFactory.decodeFile(
+                                                readable.absolutePath,
+                                                BitmapFactory.Options().apply { inSampleSize = sample },
+                                            )?.asImageBitmap()
+                                        }
+                                    } finally {
+                                        readable.delete()
+                                        if (readable != clearFile) clearFile.delete()
+                                    }
+                                }
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) {
+                                null
+                            }
+                            onReady(thumbnail)
                         }
                     },
                 )
@@ -561,6 +689,55 @@ internal fun BrankasApp(repo: VaultRepository, activity: FragmentActivity, viewM
                     },
                 )
             }
+            if (notice.isNotBlank()) {
+                Surface(
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                        .padding(WindowInsets.navigationBars.asPaddingValues())
+                        .padding(start = 20.dp, end = 20.dp, bottom = 88.dp),
+                    color = PanelRaised,
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, Line),
+                ) {
+                    Text(notice, color = Gold, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 11.dp))
+                }
+            }
+        }
         }
     }
+}
+
+private fun videoFileForFrame(file: File, mimeType: String): File {
+    val extension = when {
+        mimeType.contains("webm") -> "webm"
+        mimeType.contains("3gpp") || mimeType.contains("3gp") -> "3gp"
+        mimeType.contains("matroska") || mimeType.contains("mkv") -> "mkv"
+        else -> "mp4"
+    }
+    if (file.extension.equals(extension, ignoreCase = true)) return file
+    val named = File(file.parentFile, "${file.name}.$extension")
+    return if (file.renameTo(named)) named else file
+}
+
+private fun videoThumbnail(file: File): androidx.compose.ui.graphics.ImageBitmap? {
+    val retriever = MediaMetadataRetriever()
+    return try {
+        retriever.setDataSource(file.absolutePath)
+        val frame = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            ?: retriever.getFrameAtTime(1_000_000, MediaMetadataRetriever.OPTION_CLOSEST)
+            ?: return null
+        frameForCard(frame).asImageBitmap()
+    } catch (_: Exception) {
+        null
+    } finally {
+        runCatching { retriever.release() }
+    }
+}
+
+private fun frameForCard(frame: Bitmap): Bitmap {
+    val longest = maxOf(frame.width, frame.height)
+    if (longest <= 720) return frame
+    val scale = 720f / longest
+    val width = (frame.width * scale).toInt().coerceAtLeast(1)
+    val height = (frame.height * scale).toInt().coerceAtLeast(1)
+    return Bitmap.createScaledBitmap(frame, width, height, true).also { if (it != frame) frame.recycle() }
 }

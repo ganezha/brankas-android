@@ -20,9 +20,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.SettingsBackupRestore
 import androidx.compose.material.icons.outlined.Translate
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -46,7 +50,14 @@ import androidx.compose.ui.unit.sp
 import androidx.core.os.LocaleListCompat
 import java.util.Locale
 
-private enum class SettingsPage { Root, Language, About }
+private enum class SettingsPage { Root, Language, Backup, About }
+
+internal class VaultBackupActions(
+    val export: () -> Unit,
+    val restore: () -> Unit,
+)
+
+internal val LocalVaultBackup = staticCompositionLocalOf<VaultBackupActions?> { null }
 
 internal fun currentAppLanguage(): String {
     val selected = AppCompatDelegate.getApplicationLocales()
@@ -63,6 +74,7 @@ internal fun applyAppLanguage(tag: String) {
 internal fun SettingsGear() {
     var expanded by remember { mutableStateOf(false) }
     var page by remember { mutableStateOf(SettingsPage.Root) }
+    val backup = LocalVaultBackup.current
     Box {
         IconButton(onClick = {
             page = SettingsPage.Root
@@ -84,7 +96,19 @@ internal fun SettingsGear() {
                 when (page) {
                     SettingsPage.Root -> SettingsRoot(
                         onLanguage = { page = SettingsPage.Language },
+                        onBackup = { page = SettingsPage.Backup },
                         onAbout = { page = SettingsPage.About },
+                    )
+                    SettingsPage.Backup -> BackupPage(
+                        onBack = { page = SettingsPage.Root },
+                        onExport = {
+                            expanded = false
+                            backup?.export?.invoke()
+                        },
+                        onRestore = {
+                            expanded = false
+                            backup?.restore?.invoke()
+                        },
                     )
                     SettingsPage.Language -> LanguagePage(
                         selected = currentAppLanguage(),
@@ -102,13 +126,28 @@ internal fun SettingsGear() {
 }
 
 @Composable
-private fun SettingsRoot(onLanguage: () -> Unit, onAbout: () -> Unit) {
+private fun SettingsRoot(onLanguage: () -> Unit, onBackup: () -> Unit, onAbout: () -> Unit) {
     PanelHeading(stringResource(R.string.settings_heading))
     Spacer(Modifier.height(8.dp))
     HorizontalDivider(color = Gold.copy(alpha = 0.28f))
     Spacer(Modifier.height(6.dp))
     SettingsRow(Icons.Outlined.Translate, stringResource(R.string.settings_language), onLanguage)
+    SettingsRow(Icons.Outlined.SettingsBackupRestore, stringResource(R.string.settings_backup), onBackup)
     SettingsRow(Icons.Outlined.Info, stringResource(R.string.settings_about), onAbout)
+}
+
+@Composable
+private fun BackupPage(onBack: () -> Unit, onExport: () -> Unit, onRestore: () -> Unit) {
+    PanelBackHeader(stringResource(R.string.settings_backup), onBack)
+    Spacer(Modifier.height(8.dp))
+    HorizontalDivider(color = Gold.copy(alpha = 0.28f))
+    Spacer(Modifier.height(10.dp))
+    Text(stringResource(R.string.backup_summary), color = Muted, fontSize = 13.sp, lineHeight = 18.sp)
+    Spacer(Modifier.height(8.dp))
+    SettingsRow(Icons.Outlined.FileUpload, stringResource(R.string.backup_export), onExport)
+    SettingsRow(Icons.Outlined.FileDownload, stringResource(R.string.backup_restore), onRestore)
+    Spacer(Modifier.height(4.dp))
+    Text(stringResource(R.string.backup_restore_warning), color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
 }
 
 @Composable

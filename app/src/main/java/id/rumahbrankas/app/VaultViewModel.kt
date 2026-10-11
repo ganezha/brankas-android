@@ -6,6 +6,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import kotlinx.coroutines.sync.Mutex
 
+data class ImportProgress(val completed: Int, val total: Int, val current: Int)
+
 /** Screen state and in-memory vault key survive configuration changes without living in a composable. */
 class VaultViewModel(val repository: VaultRepository) : ViewModel() {
     val master = mutableStateOf<ByteArray?>(null)
@@ -18,6 +20,8 @@ class VaultViewModel(val repository: VaultRepository) : ViewModel() {
     )
     val credentialBusy = mutableStateOf(false)
     val locking = mutableStateOf(false)
+    val lockComplete = mutableStateOf(false)
+    val previewCacheCleared = mutableStateOf(false)
     val keyGeneration = mutableStateOf(0)
     val isForeground = mutableStateOf(true)
     /** True while the system document picker is covering this activity, so leaving must not remove the task. */
@@ -26,7 +30,9 @@ class VaultViewModel(val repository: VaultRepository) : ViewModel() {
     val systemPromptOpen = mutableStateOf(false)
     val entries = mutableStateListOf<VaultEntry>()
     val message = mutableStateOf("")
+    val notice = mutableStateOf("")
     val currentOperation = mutableStateOf<String?>(null)
+    val importProgress = mutableStateOf<ImportProgress?>(null)
     val vaultOperations = Mutex()
 
     /** Drops the unlocked session immediately, before the activity is destroyed. */
@@ -42,8 +48,12 @@ class VaultViewModel(val repository: VaultRepository) : ViewModel() {
         biometricSetup.value = false
         credentialBusy.value = false
         locking.value = false
+        lockComplete.value = false
+        previewCacheCleared.value = false
         currentOperation.value = null
+        importProgress.value = null
         message.value = ""
+        notice.value = ""
         entries.clear()
         repository.clearPreviewCache()
     }

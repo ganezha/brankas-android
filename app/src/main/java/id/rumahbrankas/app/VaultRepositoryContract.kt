@@ -18,7 +18,9 @@ interface VaultRepository {
     fun importAndMove(master: ByteArray, uri: String): ImportOutcome
     fun restoreAndMove(master: ByteArray, entry: VaultEntry, destination: String): Boolean
     fun decryptToCache(master: ByteArray, entry: VaultEntry): File
-    fun clearPreviewCache()
+    fun clearPreviewCache(): Boolean
+    fun exportBackup(destination: String)
+    fun restoreBackup(source: String)
     fun delete(master: ByteArray, entry: VaultEntry)
     fun hasBiometric(): Boolean
     fun newBiometricEncryptCipher(): Cipher

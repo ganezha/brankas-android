@@ -32,8 +32,11 @@ internal class VaultStorage(
 
     fun previewFile(name: String): File = File(cacheDir, name)
 
-    fun clearPreviewCache() {
-        cacheDir.listFiles { file -> file.name.startsWith("brankas-preview-") }?.forEach(File::delete)
+    fun clearPreviewCache(): Boolean {
+        val previews = cacheDir.listFiles { file -> file.name.startsWith("brankas-preview-") }
+            ?: return false
+        previews.forEach { file -> if (file.exists()) file.delete() }
+        return previews.none(File::exists)
     }
 
     @Synchronized

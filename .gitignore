@@ -13,3 +13,13 @@ local.properties
 key.properties
 keystore.properties
 signing.properties
+
+# Local vault data and exported encrypted backups
+vault.meta
+index.enc
+index.enc.next
+*.vlt
+*.brankas
+*.importing
+vault-restore-*/
+vault-previous-*/

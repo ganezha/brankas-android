@@ -32,11 +32,12 @@ The release variant enables R8 code shrinking, obfuscation, and resource shrinki
 - Each note body is stored in its own authenticated encrypted file. The encrypted index contains only item IDs, titles, media types, and creation times, so opening the vault does not decrypt every note body. Existing vaults with inline note bodies are migrated in a crash-safe order when first opened.
 - A PIN-derived key wraps the vault key. A one-time recovery code provides a second way to unwrap it and reset the PIN.
 - Optional biometric unlock stores only a biometric-authenticated Android Keystore wrapping of the vault key.
-- Android backup is disabled; the app requests no broad media or storage permissions.
+- Android automatic backup is disabled; the app requests no broad media or storage permissions.
+- Settings also provides user-initiated encrypted backup export and restore. The archive contains the already-encrypted vault files, restores with the same PIN or recovery code, and replaces the vault currently on the device.
 - `FLAG_SECURE` blocks normal screenshots and screen recording while the app is open.
 
 The recovery code is shown once during setup. Keep it somewhere safe outside the phone. Forgetting both the PIN and recovery code means the encrypted vault cannot be opened.
 
 ## Current scope
 
-This is a local-only first release. It has no cloud sync, account, analytics, or server. Bulk backup and production signing are not included.
+This is a local-only first release. It has no cloud sync, account, analytics, or server. It includes user-initiated encrypted backup export and restore; production signing is not included.

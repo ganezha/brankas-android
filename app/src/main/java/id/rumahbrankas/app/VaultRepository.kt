@@ -11,6 +11,8 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.InputStream
+import java.io.OutputStream
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -341,7 +343,7 @@ class DefaultVaultRepository internal constructor(
         require(!entry.isNote) { "Catatan dibaca sebagai teks." }
         val encryptedFile = storage.itemFile(entry.id, "vlt")
         val safeName = entry.title.replace(Regex("[^A-Za-z0-9._-]"), "_")
-        val outputFile = storage.previewFile("brankas-preview-${entry.id}-$safeName")
+        val outputFile = storage.previewFile("brankas-preview-${entry.id}-${java.util.UUID.randomUUID()}-$safeName")
         try {
             FileInputStream(encryptedFile).use { input ->
                 val iv = ByteArray(12)
@@ -366,7 +368,29 @@ class DefaultVaultRepository internal constructor(
         return outputFile
     }
 
-    override fun clearPreviewCache() = storage.clearPreviewCache()
+    override fun clearPreviewCache(): Boolean = storage.clearPreviewCache()
+
+    override fun exportBackup(destination: String) {
+        val documents = ContentResolverDocumentAccess(context(), context().contentResolver)
+        val output = documents.openOutputStream(destination, "wt")
+            ?: throw java.io.IOException("Tujuan cadangan tidak dapat ditulis.")
+        output.use { exportBackupTo(it) }
+    }
+
+    override fun restoreBackup(source: String) {
+        val documents = ContentResolverDocumentAccess(context(), context().contentResolver)
+        val input = documents.openInputStream(source)
+            ?: throw java.io.IOException("Cadangan tidak dapat dibaca.")
+        input.use { restoreBackupFrom(it) }
+    }
+
+    internal fun exportBackupTo(output: OutputStream) {
+        VaultArchive.export(storage.vaultDir, output)
+    }
+
+    internal fun restoreBackupFrom(input: InputStream) {
+        VaultArchive.restore(input, storage.vaultDir)
+    }
 
     override fun delete(master: ByteArray, entry: VaultEntry) {
         saveEntries(master, entries(master).filterNot { it.id == entry.id })
@@ -481,6 +505,7 @@ class DefaultVaultRepository internal constructor(
             invalid?.credentialKind == "passphrase" -> localized(R.string.error_passphrase_mismatch)
             invalid != null -> localized(R.string.error_pin_mismatch)
             causes.any { it is AEADBadTagException } -> localized(R.string.error_encrypted_data)
+            causes.any { it is BackupRejectedException } -> localized(R.string.backup_rejected)
             causes.any { it is SecurityException } -> localized(R.string.error_access_denied, operation.lowercase())
             storage != null && (detail.contains("space") || detail.contains("enospc") || detail.contains("disk full")) ->
                 localized(R.string.error_storage_full)
