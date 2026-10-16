@@ -71,10 +71,11 @@ internal fun applyAppLanguage(tag: String) {
 
 /** Gear anchored to the end of its parent. The menu is a small popup; the screen behind stays put. */
 @Composable
-internal fun SettingsGear() {
+internal fun SettingsGear(showBackup: Boolean = true) {
     var expanded by remember { mutableStateOf(false) }
     var page by remember { mutableStateOf(SettingsPage.Root) }
     val backup = LocalVaultBackup.current
+    val visiblePage = if (!showBackup && page == SettingsPage.Backup) SettingsPage.Root else page
     Box {
         IconButton(onClick = {
             page = SettingsPage.Root
@@ -93,8 +94,9 @@ internal fun SettingsGear() {
             border = BorderStroke(1.dp, Gold.copy(alpha = 0.34f)),
         ) {
             Column(Modifier.width(268.dp).padding(horizontal = 14.dp, vertical = 12.dp)) {
-                when (page) {
+                when (visiblePage) {
                     SettingsPage.Root -> SettingsRoot(
+                        showBackup = showBackup,
                         onLanguage = { page = SettingsPage.Language },
                         onBackup = { page = SettingsPage.Backup },
                         onAbout = { page = SettingsPage.About },
@@ -126,13 +128,20 @@ internal fun SettingsGear() {
 }
 
 @Composable
-private fun SettingsRoot(onLanguage: () -> Unit, onBackup: () -> Unit, onAbout: () -> Unit) {
+private fun SettingsRoot(
+    showBackup: Boolean,
+    onLanguage: () -> Unit,
+    onBackup: () -> Unit,
+    onAbout: () -> Unit,
+) {
     PanelHeading(stringResource(R.string.settings_heading))
     Spacer(Modifier.height(8.dp))
     HorizontalDivider(color = Gold.copy(alpha = 0.28f))
     Spacer(Modifier.height(6.dp))
     SettingsRow(Icons.Outlined.Translate, stringResource(R.string.settings_language), onLanguage)
-    SettingsRow(Icons.Outlined.SettingsBackupRestore, stringResource(R.string.settings_backup), onBackup)
+    if (showBackup) {
+        SettingsRow(Icons.Outlined.SettingsBackupRestore, stringResource(R.string.settings_backup), onBackup)
+    }
     SettingsRow(Icons.Outlined.Info, stringResource(R.string.settings_about), onAbout)
 }
 

@@ -5,9 +5,7 @@ import android.content.Intent
 import android.view.WindowManager
 import android.widget.VideoView
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -77,7 +75,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -89,9 +86,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -110,11 +105,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.compose.ui.viewinterop.AndroidView
 import android.graphics.BitmapFactory
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
@@ -178,9 +170,13 @@ internal fun UnlockScreen(
         .padding(WindowInsets.statusBars.asPaddingValues()).padding(top = 8.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.SpaceBetween) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { SettingsGear() }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { SettingsGear(showBackup = false) }
             Spacer(Modifier.height(28.dp))
-            VaultEyeMark(gaze.value, typedCharacters, Modifier.size(176.dp))
+            VaultEyeMark(
+                gaze.value,
+                typedCharacters,
+                modifier = Modifier.size(176.dp),
+            )
             Spacer(Modifier.height(25.dp))
             Text(stringResource(R.string.unlock_title), color = Paper, fontSize = 32.sp, fontFamily = FontFamily.Serif)
             Spacer(Modifier.height(8.dp))

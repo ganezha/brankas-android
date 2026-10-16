@@ -2,6 +2,8 @@ package id.rumahbrankas.app
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -15,40 +17,40 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
-private val ShellDark = Color(0xFF121310)
-private val ShellLit = Color(0xFF34352C)
-private val LidDark = Color(0xFF0C0D0B)
-private val LidLit = Color(0xFF24251E)
-private val Gem = Color(0xFF8C2E2C)
-private val GemLit = Color(0xFFC44B40)
-private val IrisDeep = Color(0xFF5C221E)
-private val IrisRing = Color(0xFFB83C32)
-private val IrisHot = Color(0xFFE85A42)
-private val CoreHot = Color(0xFFFFF4EC)
-private val LockMetal = Color(0xFF3C3D36)
-private val LockShade = Color(0xFF22231C)
+private val GoldLight = Color(0xFFF7ECC8)
+private val GoldMuted = Color(0xFFB8A26A)
+private val GoldDark = Color(0xFF7A683D)
+private val BezelDark = Color(0xFF141512)
+private val BezelHighlight = Color(0xFF383A31)
+private val TumblerSurface = Color(0xFF1D1E1A)
+private val RecessDark = Color(0xFF0C0D0A)
+private val TickSubtle = Color(0xFF4E5045)
 
 /**
- * The unlock emblem. The shell, lock, and red inlays stay put.
- * The eyelid rings follow a touch or the PIN field a short distance, and the red core follows farther.
+ * Precision mechanical safe dial mark for the PIN unlock screen.
+ *
+ * Combines clean, high-precision vector geometry with satisfying tactile feedback:
+ * - Rotates with a mechanical ratcheting click and combination-lock rhythm on each keystroke.
+ * - Pulses a warm-gold ember light through the center keyhole core and alignment needle.
+ * - Subtle 3D parallax layer shifts respond to touch gestures across the screen.
  */
 @Composable
 internal fun VaultEyeMark(
@@ -59,7 +61,37 @@ internal fun VaultEyeMark(
     var center by remember { mutableStateOf(Offset.Zero) }
     var placed by remember { mutableStateOf(false) }
     val reachPx = 220.dp
-    val target = when {
+
+    // Dynamic combination dial sequence: alternates clockwise & counter-clockwise
+    val targetDialAngle = remember(typedCharacters) {
+        when (typedCharacters) {
+            0 -> 0f
+            else -> {
+                val combinationSteps = floatArrayOf(
+                    0f, 48f, -36f, 75f, -55f, 96f, -70f, 120f, -85f, 140f, -100f, 165f, -125f,
+                )
+                if (typedCharacters < combinationSteps.size) {
+                    combinationSteps[typedCharacters]
+                } else {
+                    val sign = if (typedCharacters % 2 == 1) 1f else -1f
+                    sign * (40f + (typedCharacters * 14f) % 180f)
+                }
+            }
+        }
+    }
+
+    // Dial rotation with spring-snappy mechanical inertia
+    val dialRotation by animateFloatAsState(
+        targetValue = targetDialAngle,
+        animationSpec = spring(
+            dampingRatio = 0.65f,
+            stiffness = Spring.StiffnessMediumLow,
+        ),
+        label = "dialRotation",
+    )
+
+    // Touch parallax target
+    val targetParallax = when {
         gazeInWindow != null && placed -> {
             val delta = gazeInWindow - center
             val reach = with(LocalDensity.current) { reachPx.toPx() }
@@ -68,244 +100,466 @@ internal fun VaultEyeMark(
                 (delta.y / reach).coerceIn(-1f, 1f),
             )
         }
-        typedCharacters > 0 -> Offset((((typedCharacters % 5) - 2) / 2f) * 0.24f, 0.84f)
+        typedCharacters > 0 -> Offset(0f, 0.45f) // Subtle downward tilt toward keypad while typing
         else -> Offset.Zero
     }
-    val motion = spring<Float>(dampingRatio = 0.78f, stiffness = 340f)
-    val lookX by animateFloatAsState(target.x, motion, label = "eyeLookX")
-    val lookY by animateFloatAsState(target.y, motion, label = "eyeLookY")
-    val blink = remember { Animatable(0f) }
+
+    val parallaxX by animateFloatAsState(
+        targetValue = targetParallax.x,
+        animationSpec = tween(durationMillis = 100, easing = LinearEasing),
+        label = "parallaxX",
+    )
+    val parallaxY by animateFloatAsState(
+        targetValue = targetParallax.y,
+        animationSpec = tween(durationMillis = 100, easing = LinearEasing),
+        label = "parallaxY",
+    )
+
+    // Keystroke flash pulse
+    val keystrokePulse = remember { Animatable(0f) }
     LaunchedEffect(typedCharacters) {
         if (typedCharacters <= 0) return@LaunchedEffect
-        blink.snapTo(1f)
-        blink.animateTo(0f, tween(durationMillis = 240, easing = FastOutSlowInEasing))
+        keystrokePulse.snapTo(1f)
+        keystrokePulse.animateTo(
+            targetValue = 0f,
+            animationSpec = tween(durationMillis = 360, easing = FastOutSlowInEasing),
+        )
     }
-    Box(modifier.onGloballyPositioned {
-        placed = true
-        center = it.boundsInWindow().center
-    }) {
+
+    Box(
+        modifier = modifier.onGloballyPositioned {
+            placed = true
+            center = it.boundsInWindow().center
+        },
+    ) {
         Canvas(Modifier.fillMaxSize()) {
-            val radius = size.minDimension / 2f - 1.dp.toPx()
-            val origin = Offset(size.width / 2f, size.height / 2f)
-            val socket = radius * 0.57f
-            val coreShift = Offset(lookX, lookY) * socket * 0.30f
-            val irisShift = coreShift * 0.62f
-            val lidShift = coreShift * 0.34f
-            drawShell(origin, radius)
-            drawGem(origin, radius * 0.78f, -90f, radius * 0.11f, radius * 0.15f)
-            drawInlay(origin, radius, 48f)
-            drawInlay(origin, radius, 132f)
-            val opening = Path().apply { addOval(Rect(origin, socket)) }
-            clipPath(opening) {
-                translate(lidShift.x, lidShift.y) { drawEyelids(origin, socket) }
-                translate(irisShift.x, irisShift.y) { drawIris(origin, socket * 0.46f) }
-                translate(coreShift.x, coreShift.y) { drawCore(origin, socket * 0.16f) }
-                if (blink.value > 0.02f) {
-                    translate(lidShift.x, lidShift.y) { drawBlink(origin, socket, blink.value) }
+            val cx = size.width / 2f
+            val cy = size.height / 2f
+            val radius = (size.minDimension / 2f) - 6.dp.toPx()
+            if (radius <= 0f) return@Canvas
+
+            val dialCenter = Offset(cx, cy)
+            val pulse = keystrokePulse.value
+            val innerShift = Offset(parallaxX * 2.5.dp.toPx(), parallaxY * 2.5.dp.toPx())
+            val coreShift = Offset(parallaxX * 4.5.dp.toPx(), parallaxY * 4.5.dp.toPx())
+
+            // 1. Outer ambient drop shadow
+            drawCircle(
+                color = Color.Black.copy(alpha = 0.5f),
+                radius = radius + 3.dp.toPx(),
+                center = dialCenter + Offset(0f, 4.dp.toPx()),
+            )
+
+            // 2. Fixed Outer Bezel & Housing Ring
+            drawOuterBezel(dialCenter, radius)
+
+            // 3. Rotating Main Dial Wheel
+            rotate(dialRotation, dialCenter) {
+                drawRotatingDial(dialCenter, radius, pulse)
+            }
+
+            // 4. Fixed Top Alignment Needle & Pointer
+            drawTopPointer(dialCenter, radius, pulse)
+
+            // 5. Counter-Rotating Inner Tumbler Assembly (with subtle parallax)
+            val counterRotation = -dialRotation * 0.52f
+            translate(innerShift.x, innerShift.y) {
+                rotate(counterRotation, dialCenter) {
+                    drawInnerTumbler(dialCenter, radius, pulse)
                 }
             }
-            drawCircle(color = ShellLit.copy(alpha = 0.85f), radius = socket, center = origin, style = Stroke(width = 1.4.dp.toPx()))
-            drawLock(origin, radius)
-            drawGem(origin, radius * 0.90f, 90f, radius * 0.05f, radius * 0.065f)
+
+            // 6. Central Keyhole / Vault Core Emblem (highest parallax depth)
+            translate(coreShift.x, coreShift.y) {
+                drawVaultCore(dialCenter, radius, pulse)
+            }
         }
     }
 }
 
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawShell(center: Offset, radius: Float) {
-    facetRing(center, radius * 0.64f, radius * 0.98f, 14, -90f, 0.55f) { _, angle -> shellTone(angle) }
-    facetRing(center, radius * 0.575f, radius * 0.66f, 18, -80f, 0.35f) { _, angle ->
-        shellTone(angle).mix(LidDark, 0.45f)
-    }
-}
-
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawEyelids(center: Offset, socket: Float) {
-    facetRing(center, socket * 0.78f, socket * 0.98f, 16, -70f, 0.4f) { _, angle -> lidTone(angle) }
-    facetRing(center, socket * 0.60f, socket * 0.78f, 14, -50f, 0.35f) { _, angle -> lidTone(angle).mix(LidDark, 0.35f) }
-    facetRing(center, socket * 0.46f, socket * 0.60f, 12, -30f, 0.3f) { _, angle -> lidTone(angle).mix(LidDark, 0.62f) }
-    drawCircle(LidDark, socket * 0.46f, center)
-}
-
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawIris(center: Offset, radius: Float) {
-    drawCircle(IrisDeep, radius, center)
-    drawCircle(IrisRing, radius * 0.78f, center, style = Stroke(1.7.dp.toPx()))
-    drawCircle(IrisHot, radius * 0.52f, center, style = Stroke(1.45.dp.toPx()))
-    drawCircle(Color(0xFFFFB089), radius * 0.28f, center, style = Stroke(1.15.dp.toPx()))
-}
-
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCore(center: Offset, radius: Float) {
+/** Draws the heavy brushed-charcoal bezel with beveled chamfers and gold precision rivets. */
+private fun DrawScope.drawOuterBezel(center: Offset, radius: Float) {
+    // Bezel base body
     drawCircle(
-        brush = Brush.radialGradient(
-            colors = listOf(CoreHot, IrisHot, Color(0x00E85A42)),
-            center = center,
-            radius = radius * 2.4f,
-        ),
-        radius = radius * 2.4f,
+        color = BezelDark,
+        radius = radius,
         center = center,
     )
-    drawCircle(CoreHot, radius * 0.42f, center)
-}
 
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawBlink(center: Offset, socket: Float, amount: Float) {
-    val depth = amount * socket * 0.96f
-    val left = center.x - socket
-    val right = center.x + socket
-    val top = Path().apply {
-        moveTo(left, center.y - socket)
-        lineTo(right, center.y - socket)
-        lineTo(right, center.y - socket + depth * 0.35f)
-        quadraticTo(center.x, center.y - socket + depth * 1.35f, left, center.y - socket + depth * 0.35f)
-        close()
-    }
-    val bottom = Path().apply {
-        moveTo(left, center.y + socket)
-        lineTo(right, center.y + socket)
-        lineTo(right, center.y + socket - depth * 0.28f)
-        quadraticTo(center.x, center.y + socket - depth * 1.15f, left, center.y + socket - depth * 0.28f)
-        close()
-    }
-    drawPath(top, LidDark)
-    drawPath(bottom, LidDark.mix(ShellDark, 0.35f))
-}
-
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawInlay(center: Offset, radius: Float, angle: Float) {
-    val tip = polar(center, radius * 0.95f, angle)
-    val left = polar(center, radius * 0.74f, angle - 7.5f)
-    val right = polar(center, radius * 0.74f, angle + 7.5f)
-    val path = Path().apply {
-        moveTo(tip.x, tip.y)
-        lineTo(left.x, left.y)
-        lineTo(right.x, right.y)
-        close()
-    }
-    drawPath(path, Gem)
-    val highlight = Path().apply {
-        moveTo(tip.x, tip.y)
-        lineTo(left.x, left.y)
-        lineTo(polar(center, radius * 0.84f, angle).x, polar(center, radius * 0.84f, angle).y)
-        close()
-    }
-    drawPath(highlight, GemLit)
-}
-
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawGem(
-    center: Offset,
-    radius: Float,
-    angle: Float,
-    halfWidth: Float,
-    halfHeight: Float,
-) {
-    val at = polar(center, radius, angle)
-    val up = polar(Offset.Zero, 1f, angle)
-    val side = Offset(-up.y, up.x)
-    fun atDelta(along: Float, across: Float) = at + up * along + side * across
-    val top = atDelta(halfHeight, 0f)
-    val right = atDelta(0f, halfWidth)
-    val bottom = atDelta(-halfHeight * 0.72f, 0f)
-    val left = atDelta(0f, -halfWidth)
-    val path = Path().apply {
-        moveTo(top.x, top.y)
-        lineTo(right.x, right.y)
-        lineTo(bottom.x, bottom.y)
-        lineTo(left.x, left.y)
-        close()
-    }
-    drawPath(path, Gem)
-    val cap = Path().apply {
-        moveTo(top.x, top.y)
-        lineTo(right.x, right.y)
-        lineTo(at.x, at.y)
-        lineTo(left.x, left.y)
-        close()
-    }
-    drawPath(cap, GemLit)
-}
-
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawLock(center: Offset, radius: Float) {
-    val at = Offset(center.x, center.y + radius * 0.60f)
-    drawCircle(ShellLit, radius * 0.175f, at)
-    drawCircle(ShellDark, radius * 0.175f, at, style = Stroke(1.2.dp.toPx()))
-    val shackle = radius * 0.055f
-    drawArc(
-        color = LockMetal,
-        startAngle = 200f,
-        sweepAngle = 140f,
-        useCenter = false,
-        topLeft = Offset(at.x - shackle, at.y - shackle * 2.15f),
-        size = Size(shackle * 2f, shackle * 2f),
-        style = Stroke(width = radius * 0.028f, cap = StrokeCap.Round),
+    // Brushed metallic gradient ring
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(Panel, PanelRaised, BezelDark),
+            center = center,
+            radius = radius,
+        ),
+        radius = radius,
+        center = center,
     )
-    val bodyW = radius * 0.11f
-    val bodyH = radius * 0.09f
-    drawRoundRect(
-        color = LockMetal,
-        topLeft = Offset(at.x - bodyW, at.y - bodyH * 0.15f),
-        size = Size(bodyW * 2f, bodyH * 1.7f),
-        cornerRadius = CornerRadius(radius * 0.02f),
+
+    // Outer hairline border
+    drawCircle(
+        color = Line,
+        radius = radius,
+        center = center,
+        style = Stroke(width = 1.6.dp.toPx()),
     )
-    drawCircle(LockShade, radius * 0.022f, Offset(at.x, at.y + bodyH * 0.35f))
-    val hole = Path().apply {
-        moveTo(at.x - radius * 0.012f, at.y + bodyH * 0.48f)
-        lineTo(at.x + radius * 0.012f, at.y + bodyH * 0.48f)
-        lineTo(at.x, at.y + bodyH * 0.95f)
-        close()
+
+    // Dual-tone lighting bevel on the outer rim
+    drawCircle(
+        brush = Brush.sweepGradient(
+            colors = listOf(
+                BezelHighlight,
+                BezelDark,
+                Line,
+                BezelDark,
+                BezelHighlight,
+            ),
+            center = center,
+        ),
+        radius = radius - 1.dp.toPx(),
+        center = center,
+        style = Stroke(width = 1.dp.toPx()),
+    )
+
+    // 4 Corner Rivets on the Bezel (at 45°, 135°, 225°, 315°)
+    val rivetDist = radius * 0.93f
+    val rivetAngles = floatArrayOf(45f, 135f, 225f, 315f)
+    for (angle in rivetAngles) {
+        val rad = angle * (PI.toFloat() / 180f)
+        val rx = center.x + cos(rad) * rivetDist
+        val ry = center.y + sin(rad) * rivetDist
+        val rivetCenter = Offset(rx, ry)
+
+        drawCircle(
+            color = BezelDark,
+            radius = 2.8.dp.toPx(),
+            center = rivetCenter,
+        )
+        drawCircle(
+            color = GoldDark,
+            radius = 2.dp.toPx(),
+            center = rivetCenter,
+            style = Stroke(width = 0.8.dp.toPx()),
+        )
+        drawCircle(
+            color = GoldMuted,
+            radius = 0.9.dp.toPx(),
+            center = rivetCenter,
+        )
     }
-    drawPath(hole, LockShade)
 }
 
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.facetRing(
-    center: Offset,
-    inner: Float,
-    outer: Float,
-    segments: Int,
-    rotation: Float,
-    gapDegrees: Float,
-    colorFor: (index: Int, midAngle: Float) -> Color,
-) {
-    val sweep = 360f / segments
-    for (index in 0 until segments) {
-        val start = rotation + index * sweep + gapDegrees
-        val end = rotation + (index + 1) * sweep - gapDegrees
-        val mid = (start + end) / 2f
-        val outerStart = polar(center, outer, start)
-        val outerEnd = polar(center, outer, end)
-        val innerEnd = polar(center, inner, end)
-        val innerStart = polar(center, inner, start)
-        val path = Path().apply {
-            moveTo(outerStart.x, outerStart.y)
-            lineTo(outerEnd.x, outerEnd.y)
-            lineTo(innerEnd.x, innerEnd.y)
-            lineTo(innerStart.x, innerStart.y)
-            close()
+/** Draws the rotating combination dial with 60 precision tick marks and cardinal gold diamonds. */
+private fun DrawScope.drawRotatingDial(center: Offset, radius: Float, pulse: Float) {
+    val dialRadius = radius * 0.87f
+
+    // Dial background disc
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(PanelRaised, TumblerSurface, BezelDark),
+            center = center,
+            radius = dialRadius,
+        ),
+        radius = dialRadius,
+        center = center,
+    )
+
+    // Outer edge groove of the dial
+    drawCircle(
+        color = Line.copy(alpha = 0.8f),
+        radius = dialRadius,
+        center = center,
+        style = Stroke(width = 1.2.dp.toPx()),
+    )
+
+    // 60 Precision Radial Tick Marks (every 6 degrees)
+    val outerTickR = dialRadius - 2.dp.toPx()
+    for (i in 0 until 60) {
+        val angleDeg = i * 6f
+        val rad = angleDeg * (PI.toFloat() / 180f)
+        val cosA = cos(rad)
+        val sinA = sin(rad)
+
+        val isMajor = (i % 5 == 0) // Every 30 degrees (12 major ticks)
+        val isMedium = (i % 5 == 2 || i % 5 == 3) // Intermediate ticks
+
+        val tickLen = when {
+            isMajor -> 7.dp.toPx()
+            isMedium -> 4.5.dp.toPx()
+            else -> 3.dp.toPx()
         }
-        drawPath(path, colorFor(index, mid))
+
+        val startR = outerTickR - tickLen
+        val start = Offset(center.x + cosA * startR, center.y + sinA * startR)
+        val end = Offset(center.x + cosA * outerTickR, center.y + sinA * outerTickR)
+
+        val tickColor = when {
+            isMajor -> {
+                if (pulse > 0.05f) {
+                    Gold.mix(GoldLight, pulse * 0.7f)
+                } else {
+                    Gold
+                }
+            }
+            isMedium -> GoldMuted.copy(alpha = 0.75f)
+            else -> TickSubtle
+        }
+
+        val strokeWidth = when {
+            isMajor -> 1.7.dp.toPx()
+            isMedium -> 1.1.dp.toPx()
+            else -> 0.8.dp.toPx()
+        }
+
+        drawLine(
+            color = tickColor,
+            start = start,
+            end = end,
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
+    }
+
+    // 4 Cardinal Gold Diamond Studs at 0°, 90°, 180°, 270°
+    val diamondDist = dialRadius * 0.72f
+    val diamondAngles = floatArrayOf(0f, 90f, 180f, 270f)
+    for (angle in diamondAngles) {
+        val rad = angle * (PI.toFloat() / 180f)
+        val dx = center.x + cos(rad) * diamondDist
+        val dy = center.y + sin(rad) * diamondDist
+        drawDiamond(Offset(dx, dy), 3.2.dp.toPx(), Gold)
+    }
+
+    // Inner dial track border
+    drawCircle(
+        color = Line.copy(alpha = 0.6f),
+        radius = dialRadius * 0.62f,
+        center = center,
+        style = Stroke(width = 0.9.dp.toPx()),
+    )
+}
+
+/** Draws the top alignment pointer (the stationary reference needle at 12 o'clock). */
+private fun DrawScope.drawTopPointer(center: Offset, radius: Float, pulse: Float) {
+    val pointerTipY = center.y - radius * 0.87f
+    val pointerBaseY = center.y - radius * 0.98f
+    val halfWidth = 5.5.dp.toPx()
+
+    // Warm glow behind pointer on pulse
+    if (pulse > 0.02f) {
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    GoldLight.copy(alpha = 0.5f * pulse),
+                    Gold.copy(alpha = 0.2f * pulse),
+                    Color.Transparent,
+                ),
+                center = Offset(center.x, pointerTipY),
+                radius = 16.dp.toPx(),
+            ),
+            radius = 16.dp.toPx(),
+            center = Offset(center.x, pointerTipY),
+        )
+    }
+
+    // Triangular downward pointer
+    val pointerPath = Path().apply {
+        moveTo(center.x, pointerTipY)
+        lineTo(center.x - halfWidth, pointerBaseY)
+        lineTo(center.x + halfWidth, pointerBaseY)
+        close()
+    }
+
+    val pointerColor = Gold.mix(GoldLight, pulse)
+    drawPath(pointerPath, color = pointerColor)
+
+    // Center jewel line on pointer
+    drawLine(
+        color = Paper,
+        start = Offset(center.x, pointerTipY + 1.dp.toPx()),
+        end = Offset(center.x, pointerBaseY),
+        strokeWidth = 1.1.dp.toPx(),
+    )
+}
+
+/** Draws the counter-rotating inner tumbler ring with lathe grooves and mechanical ports. */
+private fun DrawScope.drawInnerTumbler(center: Offset, radius: Float, pulse: Float) {
+    val tumblerRadius = radius * 0.54f
+
+    // Recessed dark groove between outer dial and tumbler
+    drawCircle(
+        color = RecessDark,
+        radius = tumblerRadius + 2.dp.toPx(),
+        center = center,
+    )
+    drawCircle(
+        color = GoldDark.copy(alpha = 0.4f),
+        radius = tumblerRadius + 1.dp.toPx(),
+        center = center,
+        style = Stroke(width = 0.8.dp.toPx()),
+    )
+
+    // Tumbler disc base
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(PanelRaised, TumblerSurface, BezelDark),
+            center = center,
+            radius = tumblerRadius,
+        ),
+        radius = tumblerRadius,
+        center = center,
+    )
+
+    // Concentric precision lathe grooves (machined metallic finish)
+    val latheRadii = floatArrayOf(tumblerRadius * 0.90f, tumblerRadius * 0.76f, tumblerRadius * 0.62f)
+    for (r in latheRadii) {
+        drawCircle(
+            color = Line.copy(alpha = 0.45f),
+            radius = r,
+            center = center,
+            style = Stroke(width = 0.7.dp.toPx()),
+        )
+    }
+
+    // 6 Mechanical Port Openings around the tumbler
+    val portCount = 6
+    val portDist = tumblerRadius * 0.76f
+    val portRadius = 3.6.dp.toPx()
+    for (i in 0 until portCount) {
+        val angle = i * (360f / portCount) * (PI.toFloat() / 180f)
+        val px = center.x + cos(angle) * portDist
+        val py = center.y + sin(angle) * portDist
+        val portCenter = Offset(px, py)
+
+        // Recessed cavity
+        drawCircle(
+            color = RecessDark,
+            radius = portRadius,
+            center = portCenter,
+        )
+        drawCircle(
+            color = Line,
+            radius = portRadius,
+            center = portCenter,
+            style = Stroke(width = 0.8.dp.toPx()),
+        )
+        // Center brass pin in port
+        val pinColor = if (pulse > 0.1f) GoldLight else GoldMuted
+        drawCircle(
+            color = pinColor,
+            radius = 1.2.dp.toPx(),
+            center = portCenter,
+        )
     }
 }
 
-private fun shellTone(angle: Float): Color {
-    val tone = lightAmount(angle)
-    val wobble = if (((angle + 90f) / (360f / 14f)).toInt() % 2 == 0) 0.06f else -0.04f
-    return ShellDark.mix(ShellLit, (tone + wobble).coerceIn(0f, 1f))
+/** Draws the central raised vault hub with the golden geometric keyhole / safe crest. */
+private fun DrawScope.drawVaultCore(center: Offset, radius: Float, pulse: Float) {
+    val coreRadius = radius * 0.28f
+
+    // Ambient shadow under center hub
+    drawCircle(
+        color = Color.Black.copy(alpha = 0.6f),
+        radius = coreRadius + 2.dp.toPx(),
+        center = center + Offset(0f, 2.dp.toPx()),
+    )
+
+    // Raised boss body
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(PanelRaised, Panel, BezelDark),
+            center = center,
+            radius = coreRadius,
+        ),
+        radius = coreRadius,
+        center = center,
+    )
+
+    // Outer golden bezel ring of center hub
+    drawCircle(
+        color = Gold.mix(GoldLight, pulse * 0.5f),
+        radius = coreRadius,
+        center = center,
+        style = Stroke(width = 1.6.dp.toPx()),
+    )
+
+    // Inner fine accent ring
+    drawCircle(
+        color = Line,
+        radius = coreRadius - 2.5.dp.toPx(),
+        center = center,
+        style = Stroke(width = 0.8.dp.toPx()),
+    )
+
+    // Core warm ember glow behind keyhole
+    val glowAlpha = (0.28f + 0.62f * pulse).coerceIn(0f, 1f)
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(
+                GoldLight.copy(alpha = glowAlpha),
+                Gold.copy(alpha = glowAlpha * 0.45f),
+                Color.Transparent,
+            ),
+            center = center,
+            radius = coreRadius * 0.95f,
+        ),
+        radius = coreRadius * 0.95f,
+        center = center,
+    )
+
+    // Stylized Keyhole Geometry in the center
+    val keyholeTopR = 4.8.dp.toPx()
+    val keyholeTopCenter = center - Offset(0f, 2.2.dp.toPx())
+    val slotW = 3.6.dp.toPx()
+    val slotBottomY = center.y + 7.5.dp.toPx()
+
+    val keyholePath = Path().apply {
+        // Upper circle of keyhole
+        addOval(
+            androidx.compose.ui.geometry.Rect(
+                center = keyholeTopCenter,
+                radius = keyholeTopR,
+            ),
+        )
+        // Lower slot
+        moveTo(center.x - slotW / 2f, keyholeTopCenter.y)
+        lineTo(center.x - slotW * 0.8f, slotBottomY)
+        lineTo(center.x + slotW * 0.8f, slotBottomY)
+        lineTo(center.x + slotW / 2f, keyholeTopCenter.y)
+        close()
+    }
+
+    // Keyhole interior (dark vault depth)
+    drawPath(keyholePath, color = RecessDark)
+
+    // Keyhole rim stroke in warm gold
+    drawPath(
+        path = keyholePath,
+        color = Gold.mix(GoldLight, pulse),
+        style = Stroke(width = 1.1.dp.toPx()),
+    )
 }
 
-private fun lidTone(angle: Float): Color = LidDark.mix(LidLit, lightAmount(angle) * 0.85f)
-
-private fun lightAmount(angle: Float): Float {
-    val radians = Math.toRadians(angle.toDouble())
-    val dot = cos(radians).toFloat() * -0.28f + sin(radians).toFloat() * -0.96f
-    return ((dot + 1f) * 0.5f).coerceIn(0f, 1f)
+/** Draws a symmetrical 4-point diamond star ornament. */
+private fun DrawScope.drawDiamond(center: Offset, size: Float, color: Color) {
+    val path = Path().apply {
+        moveTo(center.x, center.y - size)
+        lineTo(center.x + size * 0.7f, center.y)
+        lineTo(center.x, center.y + size)
+        lineTo(center.x - size * 0.7f, center.y)
+        close()
+    }
+    drawPath(path, color)
 }
 
-private fun polar(center: Offset, radius: Float, degrees: Float): Offset {
-    val radians = Math.toRadians(degrees.toDouble())
-    return Offset(center.x + cos(radians).toFloat() * radius, center.y + sin(radians).toFloat() * radius)
-}
-
-private fun Color.mix(other: Color, amount: Float): Color {
-    val ratio = amount.coerceIn(0f, 1f)
+/** Utility to blend two colors. */
+private fun Color.mix(other: Color, ratio: Float): Color {
+    val r = ratio.coerceIn(0f, 1f)
     return Color(
-        red = red + (other.red - red) * ratio,
-        green = green + (other.green - green) * ratio,
-        blue = blue + (other.blue - blue) * ratio,
-        alpha = alpha + (other.alpha - alpha) * ratio,
+        red = red + (other.red - red) * r,
+        green = green + (other.green - green) * r,
+        blue = blue + (other.blue - blue) * r,
+        alpha = alpha + (other.alpha - alpha) * r,
     )
 }
