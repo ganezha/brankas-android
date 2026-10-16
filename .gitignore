@@ -10,9 +10,19 @@ local.properties
 *.keystore
 *.p12
 *.pfx
+*.pem
+*.key
 key.properties
 keystore.properties
 signing.properties
+
+# Local environment variables and credentials
+.env
+.env.*
+!.env.example
+credentials.json
+secrets.json
+service-account*.json
 
 # Local vault data and exported encrypted backups
 vault.meta
