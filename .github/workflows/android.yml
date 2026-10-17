@@ -79,15 +79,23 @@ jobs:
           retention-days: 14
 
   release:
-    name: Publish GitHub Release
+    name: Sign and publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [ test, build ]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK signing tools
+        uses: android-actions/setup-android@v4.0.4
+        with:
+          packages: 'build-tools;35.0.0'
 
       - name: Download APK Artifacts
         uses: actions/download-artifact@v5
@@ -95,10 +103,56 @@ jobs:
           name: brankas-apks
           path: release-assets
 
+      - name: Decode Android signing keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${ANDROID_KEYSTORE_BASE64:-}" ]]; then
+            echo "::error::Missing GitHub Actions secret ANDROID_KEYSTORE_BASE64."
+            exit 1
+          fi
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/brankas-release.jks"
+          test -s "$RUNNER_TEMP/brankas-release.jks"
+          chmod 600 "$RUNNER_TEMP/brankas-release.jks"
+
+      - name: Align, sign, and verify release APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing GitHub Actions secret ${name}."
+              exit 1
+            fi
+          done
+
+          build_tools="$ANDROID_SDK_ROOT/build-tools/35.0.0"
+          unsigned_apk="release-assets/brankas-release-unsigned.apk"
+          aligned_apk="$RUNNER_TEMP/brankas-release-aligned.apk"
+          signed_apk="release-assets/brankas-release-signed.apk"
+
+          "$build_tools/zipalign" -f -p 4 "$unsigned_apk" "$aligned_apk"
+          "$build_tools/apksigner" sign \
+            --ks "$RUNNER_TEMP/brankas-release.jks" \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
+            --key-pass env:ANDROID_KEY_PASSWORD \
+            --out "$signed_apk" \
+            "$aligned_apk"
+          "$build_tools/apksigner" verify --verbose "$signed_apk"
+
+      - name: Remove signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/brankas-release.jks" "$RUNNER_TEMP/brankas-release-aligned.apk"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release-assets/*.apk
+          files: release-assets/brankas-release-signed.apk
           generate_release_notes: true
           draft: false
           prerelease: false
