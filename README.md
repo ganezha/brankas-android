@@ -10,7 +10,7 @@
     <img src="https://img.shields.io/badge/Language-Kotlin%202.0-1A1B18.svg?style=flat-square&logo=kotlin&logoColor=D3BD82" alt="Language: Kotlin 2.0" />
     <img src="https://img.shields.io/badge/Cipher-AES--256--GCM-D3BD82.svg?style=flat-square" alt="Cipher: AES-256-GCM" />
     <img src="https://img.shields.io/badge/Network-Zero%20(Air--Gapped)-1A1B18.svg?style=flat-square" alt="Network: Zero" />
-    <img src="https://img.shields.io/badge/Tests-Passing%20(100%25)-4E5045.svg?style=flat-square" alt="Tests: Passing" />
+    <a href="https://github.com/ganezha/brankas-android/actions/workflows/android.yml"><img src="https://github.com/ganezha/brankas-android/actions/workflows/android.yml/badge.svg" alt="Brankas CI/CD" /></a>
   </p>
 </p>
 
