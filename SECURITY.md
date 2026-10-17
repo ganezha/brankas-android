@@ -30,4 +30,4 @@ Brankas is a local-only Android application without an account, cloud sync, anal
 
 The Android operating system, a compromised or rooted device, and third-party document or backup providers are outside the project's control. Please still report a concrete issue if Brankas itself mishandles data or fails to protect it while interacting with those components.
 
-Brankas supports user-initiated encrypted backup export. Anyone handling a backup should treat it as sensitive: it contains encrypted vault files and is intended to be opened with the vault's PIN or recovery code. Choose a trusted destination and never include a real backup in a public report.
+Brankas supports user-initiated encrypted backup export. Anyone handling a backup should treat it as sensitive: it contains encrypted vault files and a master key wrapped with the 160-bit recovery code using Argon2id. Backups do not contain the vault's PIN wrapper. Restore requires the recovery code and asks the user to create a new PIN. Choose a trusted destination and never include a real backup in a public report.

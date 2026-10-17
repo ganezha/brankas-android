@@ -6,7 +6,7 @@
   </p>
   <p align="center">
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-D3BD82.svg?style=flat-square" alt="License: GPL-3.0" /></a>
-    <img src="https://img.shields.io/badge/Platform-Android%208.0%2B%20(API%2026--35)-1A1B18.svg?style=flat-square&logo=android&logoColor=D3BD82" alt="Platform: Android 8.0+" />
+    <img src="https://img.shields.io/badge/Platform-Android%208.0%2B%20(API%2026--36)-1A1B18.svg?style=flat-square&logo=android&logoColor=D3BD82" alt="Platform: Android 8.0+" />
     <img src="https://img.shields.io/badge/Language-Kotlin%202.0-1A1B18.svg?style=flat-square&logo=kotlin&logoColor=D3BD82" alt="Language: Kotlin 2.0" />
     <img src="https://img.shields.io/badge/Cipher-AES--256--GCM-D3BD82.svg?style=flat-square" alt="Cipher: AES-256-GCM" />
     <img src="https://img.shields.io/badge/Network-Zero%20(Air--Gapped)-1A1B18.svg?style=flat-square" alt="Network: Zero" />
@@ -55,7 +55,7 @@ Designed for independent security verification and cryptographic audits:
 | **Integrity Verification** | Trailing SHA-256 Digest | End-to-end streaming digest check against ciphertext tampering |
 | **Volatile Sanitization** | Explicit Buffer Zeroing | Sensitive arrays cleared via `.fill(0)` / `.fill('\u0000')` post-computation |
 | **Storage Sandbox** | App-isolated scoped storage | Stored in `context.filesDir` with Android automatic cloud backup disabled |
-| **Backup Archive Format** | `BRANKASBK1` container | Self-contained, authenticated payload with zero plaintext leakage |
+| **Backup Archive Format** | `BRANKASBK1` v2 container | Encrypted vault records; the master key is wrapped with the recovery code using Argon2id, without PIN wrappers |
 
 ---
 
@@ -65,7 +65,7 @@ Designed for independent security verification and cryptographic audits:
 
 * **No Network Permission:** The `android.permission.INTERNET` permission is completely omitted from `AndroidManifest.xml`. It is impossible for the binary to communicate across local networks or the internet.
 * **Zero Telemetry & Analytics:** No analytics daemons, crash reporters, or external tracking SDKs are compiled into the codebase.
-* **Air-Gapped Standalone Backups:** Encrypted backups (`BRANKASBK1`) can be exported to offline physical media (USB drive, SD card) and restored on another device using the original PIN or recovery key.
+* **Air-Gapped Standalone Backups:** Encrypted backups (`BRANKASBK1`) can be exported to offline physical media (USB drive, SD card) and restored on another device using the recovery code, then protected by a newly created PIN.
 
 ---
 
@@ -82,8 +82,8 @@ Designed for independent security verification and cryptographic audits:
 
 ### Prerequisites
 * **JDK:** Version 17
-* **Android SDK:** Platform 35 / Build-Tools 35.0.0
-* **Gradle:** 8.11.1 (via included wrapper)
+* **Android SDK:** Platform 36 / Build-Tools 35.0.0
+* **Gradle Wrapper:** 8.11.1
 
 ### 1. Run Cryptographic & Unit Test Suite
 Verify that all unit tests (including PBKDF2 iteration bounds, AES-GCM roundtrips, migration atomicity, and recovery routines) pass:
@@ -100,16 +100,18 @@ To assemble the debug build for local testing and inspection:
 ```
 *Output artifact:* `app/build/outputs/apk/debug/app-debug.apk`
 
-### 3. Build Optimized Release APK
-To assemble the release variant with R8 code shrinking, resource shrinking, and symbol obfuscation:
+### 3. Build Optimized Release APK and App Bundle
+To assemble the release variant with R8 code shrinking and resource shrinking:
 
 ```powershell
 .\gradlew.bat assembleRelease
+.\gradlew.bat bundleRelease
 ```
 *Output artifact:* `app/build/outputs/apk/release/app-release-unsigned.apk`
+*App Bundle:* `app/build/outputs/bundle/release/app-release.aab`
 
 > [!NOTE]
-> For production distribution, sign the APK using Android Studio's **Generate Signed Bundle / APK** flow. Never commit signing keys or passwords to the repository (`.gitignore` enforces isolation for keystores and signing properties).
+> On version tags (`v*`), GitHub Actions signs the release APK and AAB with the configured repository secrets and attaches both files to the GitHub Release. Never commit signing keys or passwords to the repository (`.gitignore` enforces isolation for keystores and signing properties).
 
 ---
 

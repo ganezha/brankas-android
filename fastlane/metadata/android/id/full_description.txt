@@ -1,0 +1,14 @@
+Brankas adalah tempat pribadi untuk menyimpan foto, video, dan catatan secara lokal di perangkat Anda.
+
+Lindungi item pribadi dalam brankas terenkripsi dengan PIN atau frasa sandi. Anda juga dapat mengaktifkan pembukaan dengan biometrik di perangkat.
+
+CADANGKAN DAN PULIHKAN
+Buat cadangan terenkripsi yang dilindungi kode pemulihan. PIN tidak disertakan dalam cadangan. Untuk memulihkannya, masukkan kode pemulihan, konfirmasi cadangan, lalu buat PIN baru. Brankas memverifikasi cadangan sebelum mengganti brankas saat ini dan menjaga brankas lama hingga pemulihan berhasil.
+
+PRIVASI SEJAK AWAL
+• Tidak perlu akun
+• Tanpa iklan, analitik, atau pelacak
+• Tanpa izin internet; data brankas tetap di perangkat
+• Ekspor cadangan melalui pemilih file Android ke lokasi pilihan Anda
+
+Simpan kode pemulihan di tempat yang aman dan terpisah dari perangkat. Kode ini diperlukan untuk memulihkan cadangan jika Anda kehilangan akses ke brankas.

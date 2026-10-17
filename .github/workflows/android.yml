@@ -42,7 +42,7 @@ jobs:
           retention-days: 7
 
   build:
-    name: Build APK Artifacts
+    name: Build APK and AAB Artifacts
     needs: test
     runs-on: ubuntu-24.04
     steps:
@@ -65,17 +65,21 @@ jobs:
       - name: Build Optimized Release APK (Unsigned)
         run: ./gradlew assembleRelease --no-daemon
 
-      - name: Stage APKs for Artifacts
+      - name: Build Release AAB (Unsigned)
+        run: ./gradlew bundleRelease --no-daemon
+
+      - name: Stage APK and AAB Artifacts
         run: |
           mkdir -p build-artifacts
           cp app/build/outputs/apk/debug/app-debug.apk build-artifacts/brankas-debug.apk
           cp app/build/outputs/apk/release/app-release-unsigned.apk build-artifacts/brankas-release-unsigned.apk
+          cp app/build/outputs/bundle/release/app-release.aab build-artifacts/brankas-release-unsigned.aab
 
-      - name: Upload APK Artifacts
+      - name: Upload APK and AAB Artifacts
         uses: actions/upload-artifact@v5
         with:
-          name: brankas-apks
-          path: build-artifacts/*.apk
+          name: brankas-release-artifacts
+          path: build-artifacts/*
           retention-days: 14
 
   release:
@@ -97,10 +101,10 @@ jobs:
         with:
           packages: 'build-tools;35.0.0'
 
-      - name: Download APK Artifacts
+      - name: Download APK and AAB Artifacts
         uses: actions/download-artifact@v5
         with:
-          name: brankas-apks
+          name: brankas-release-artifacts
           path: release-assets
 
       - name: Decode Android signing keystore
@@ -145,6 +149,31 @@ jobs:
             "$aligned_apk"
           "$build_tools/apksigner" verify --verbose "$signed_apk"
 
+      - name: Sign and verify release AAB
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing GitHub Actions secret ${name}."
+              exit 1
+            fi
+          done
+
+          unsigned_aab="release-assets/brankas-release-unsigned.aab"
+          signed_aab="release-assets/brankas-release-signed.aab"
+          jarsigner \
+            -keystore "$RUNNER_TEMP/brankas-release.jks" \
+            -storepass:env ANDROID_KEYSTORE_PASSWORD \
+            -keypass:env ANDROID_KEY_PASSWORD \
+            -signedjar "$signed_aab" \
+            "$unsigned_aab" \
+            "$ANDROID_KEY_ALIAS"
+          jarsigner -verify -verbose -certs "$signed_aab"
+
       - name: Remove signing material
         if: always()
         run: rm -f "$RUNNER_TEMP/brankas-release.jks" "$RUNNER_TEMP/brankas-release-aligned.apk"
@@ -152,7 +181,9 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release-assets/brankas-release-signed.apk
+          files: |
+            release-assets/brankas-release-signed.apk
+            release-assets/brankas-release-signed.aab
           generate_release_notes: true
           draft: false
           prerelease: false

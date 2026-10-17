@@ -58,7 +58,15 @@ class DefaultVaultRepository internal constructor(
     private val random = SecureRandom()
     private val bioAlias = "brankas-biometric-v1"
 
-    init { clearPreviewCache() }
+    init {
+        clearPreviewCache()
+        filesDir.listFiles().orEmpty()
+            .filter {
+                it.isDirectory && it.name.startsWith("vault-restore-") &&
+                    System.currentTimeMillis() - it.lastModified() > 24L * 60L * 60L * 1_000L
+            }
+            .forEach { it.deleteRecursively() }
+    }
 
     override fun exists(): Boolean = storage.hasMetadata()
 
@@ -370,26 +378,164 @@ class DefaultVaultRepository internal constructor(
 
     override fun clearPreviewCache(): Boolean = storage.clearPreviewCache()
 
-    override fun exportBackup(destination: String) {
+    override fun prepareBackupExport(master: ByteArray, recoveryCode: CharArray): BackupKeyEnvelope {
+        check(exists()) { "Brankas belum ada." }
+        val normalized = normalizeRecoveryCode(recoveryCode)
+        try {
+            val meta = readMeta()
+            val recoveryAttempt = normalized.copyOf()
+            val recovered = try {
+                unwrapMetadata(meta, "recovery", recoveryAttempt)
+            } catch (_: AEADBadTagException) {
+                throw InvalidCredentialException("recovery")
+            } finally {
+                recoveryAttempt.fill('\u0000')
+            }
+            try {
+                if (!MessageDigest.isEqual(recovered, master)) throw InvalidCredentialException("recovery")
+            } finally {
+                recovered.fill(0)
+            }
+
+            val salt = ByteArray(16).also(random::nextBytes)
+            val derived = BackupKeyKdf.derive(normalized.copyOf(), salt)
+            val wrapped = try { encrypt(derived, master) } finally { derived.fill(0) }
+            return BackupKeyEnvelope(salt, wrapped.first, wrapped.second)
+        } finally {
+            normalized.fill('\u0000')
+        }
+    }
+
+    override fun exportBackup(destination: String, envelope: BackupKeyEnvelope) {
         val documents = ContentResolverDocumentAccess(context(), context().contentResolver)
         val output = documents.openOutputStream(destination, "wt")
             ?: throw java.io.IOException("Tujuan cadangan tidak dapat ditulis.")
-        output.use { exportBackupTo(it) }
+        output.use { exportBackupTo(it, envelope) }
     }
 
-    override fun restoreBackup(source: String) {
+    override fun prepareBackupRestore(source: String, recoveryCode: CharArray): BackupRestoreSession {
         val documents = ContentResolverDocumentAccess(context(), context().contentResolver)
         val input = documents.openInputStream(source)
             ?: throw java.io.IOException("Cadangan tidak dapat dibaca.")
-        input.use { restoreBackupFrom(it) }
+        return input.use { prepareBackupRestoreFrom(it, recoveryCode) }
     }
 
-    internal fun exportBackupTo(output: OutputStream) {
-        VaultArchive.export(storage.vaultDir, output)
+    override fun completeBackupRestore(session: BackupRestoreSession, newPin: CharArray) {
+        try {
+            validateCredential(newPin, "pin")
+            val pinForVerification = newPin.copyOf()
+            try {
+                synchronized(session.lock) {
+                    checkRestoreSession(session)
+                    val originalMetadata = JSONObject(File(session.stagingDirectory, "vault.meta").readText())
+                    val metadata = JSONObject(originalMetadata.toString())
+                    val master = unwrapBackupMaster(metadata, session.archiveVersion, session.recoveryCode.copyOf())
+                    try {
+                        verifyStagedIndex(master, session.stagingDirectory)
+                        val pinSalt = ByteArray(16).also(random::nextBytes)
+                        val pinDerived = deriveKey(newPin, pinSalt)
+                        val pinWrap = try { encrypt(pinDerived, master) } finally { pinDerived.fill(0) }
+                        val recoverySalt = ByteArray(16).also(random::nextBytes)
+                        val recoveryDerived = deriveKey(session.recoveryCode.copyOf(), recoverySalt)
+                        val recoveryWrap = try { encrypt(recoveryDerived, master) } finally { recoveryDerived.fill(0) }
+                        listOf(
+                            "pinSalt", "pinIv", "pinKey",
+                            "recoverySalt", "recoveryIv", "recoveryKey",
+                            "backupKdf", "backupSalt", "backupIv", "backupKey",
+                            "bioIv", "bioKey",
+                            "failedPinAttempts", "nextPinAttemptAt",
+                        ).forEach { metadata.remove(it) }
+                        metadata.put("version", 2)
+                            .put("credentialType", "pin")
+                            .put("pinSalt", pinSalt.hex())
+                            .put("pinIv", pinWrap.first.hex())
+                            .put("pinKey", pinWrap.second.hex())
+                            .put("recoverySalt", recoverySalt.hex())
+                            .put("recoveryIv", recoveryWrap.first.hex())
+                            .put("recoveryKey", recoveryWrap.second.hex())
+                            .put("failedPinAttempts", 0)
+                            .put("nextPinAttemptAt", 0L)
+                        val staged = StagedVaultArchive(session.stagingDirectory, 2, metadata)
+                        try {
+                            VaultArchive.writeMetadata(staged, metadata)
+                            VaultArchive.install(staged, storage.vaultDir, verifyInstalled = { installedDirectory ->
+                                val installedMetadata = JSONObject(File(installedDirectory, "vault.meta").readText())
+                                verifyRestoredWrapper(installedMetadata, "pin", pinForVerification.copyOf(), master)
+                                verifyRestoredWrapper(installedMetadata, "recovery", session.recoveryCode.copyOf(), master)
+                                verifyStagedIndex(master, installedDirectory)
+                            })
+                        } catch (error: Throwable) {
+                            if (session.stagingDirectory.isDirectory) {
+                                try {
+                                    VaultArchive.writeMetadata(staged, originalMetadata)
+                                } catch (rollbackError: Throwable) {
+                                    error.addSuppressed(rollbackError)
+                                }
+                            }
+                            throw error
+                        }
+                        session.invalidate()
+                    } finally {
+                        master.fill(0)
+                    }
+                }
+            } finally {
+                pinForVerification.fill('\u0000')
+            }
+        } finally {
+            newPin.fill('\u0000')
+        }
     }
 
-    internal fun restoreBackupFrom(input: InputStream) {
-        VaultArchive.restore(input, storage.vaultDir)
+    override fun cancelBackupRestore(session: BackupRestoreSession) {
+        if (session.ownerDirectory != filesDir.absolutePath) return
+        session.invalidate()
+        VaultArchive.discard(StagedVaultArchive(session.stagingDirectory, 2, JSONObject()))
+    }
+
+    internal fun exportBackupTo(output: OutputStream, envelope: BackupKeyEnvelope) {
+        val backupMetadata = JSONObject(readMeta().toString())
+        listOf(
+            "pinSalt", "pinIv", "pinKey",
+            "recoverySalt", "recoveryIv", "recoveryKey",
+            "bioIv", "bioKey",
+            "backupKdf", "backupSalt", "backupIv", "backupKey",
+            "failedPinAttempts", "nextPinAttemptAt",
+        ).forEach { backupMetadata.remove(it) }
+        backupMetadata.put("version", 2)
+            .put("backupKdf", BackupKeyKdf.ID)
+            .put("backupSalt", envelope.salt.hex())
+            .put("backupIv", envelope.iv.hex())
+            .put("backupKey", envelope.wrappedKey.hex())
+        VaultArchive.export(storage.vaultDir, output, backupMetadata)
+    }
+
+    internal fun prepareBackupRestoreFrom(input: InputStream, recoveryCode: CharArray): BackupRestoreSession {
+        val normalized = normalizeRecoveryCode(recoveryCode)
+        var staged: StagedVaultArchive? = null
+        try {
+            val archive = VaultArchive.stage(input, storage.vaultDir)
+            staged = archive
+            val restoredMaster = unwrapBackupMaster(archive.metadata, archive.version, normalized.copyOf())
+            try {
+                verifyStagedIndex(restoredMaster, archive.directory)
+                val metadata = archive.metadata
+                listOf(
+                    "pinSalt", "pinIv", "pinKey",
+                    "bioIv", "bioKey",
+                    "failedPinAttempts", "nextPinAttemptAt",
+                ).forEach { metadata.remove(it) }
+                VaultArchive.writeMetadata(archive, metadata)
+                return BackupRestoreSession(filesDir.absolutePath, archive.directory, normalized.copyOf(), archive.version)
+            } finally {
+                restoredMaster.fill(0)
+            }
+        } catch (error: Exception) {
+            staged?.let(VaultArchive::discard)
+            throw error
+        } finally {
+            normalized.fill('\u0000')
+        }
     }
 
     override fun delete(master: ByteArray, entry: VaultEntry) {
@@ -447,19 +593,119 @@ class DefaultVaultRepository internal constructor(
         val meta = readMeta()
         val storedKind = meta.optString("credentialType", "pin")
         if (kind == "pin" && storedKind == "pin") checkPinAttemptDelay(meta)
-        val key = deriveKey(passphrase, meta.getString("${kind}Salt").unhex())
         try {
             val result = try {
-                decrypt(key, meta.getString("${kind}Iv").unhex(), meta.getString("${kind}Key").unhex())
+                unwrapMetadata(meta, kind, passphrase)
             } catch (_: AEADBadTagException) {
                 if (kind == "pin" && storedKind == "pin") recordFailedPinAttempt(meta)
                 throw InvalidCredentialException(if (kind == "recovery") "recovery" else storedKind)
             }
             if (kind == "pin" && storedKind == "pin") clearFailedPinAttempts(meta)
             return result
+        } catch (error: Exception) {
+            passphrase.fill('\u0000')
+            throw error
+        }
+    }
+
+    private fun unwrapMetadata(meta: JSONObject, kind: String, secret: CharArray): ByteArray {
+        val key = deriveKey(secret, meta.getString("${kind}Salt").unhex())
+        return try {
+            decrypt(key, meta.getString("${kind}Iv").unhex(), meta.getString("${kind}Key").unhex())
         } finally {
             key.fill(0)
         }
+    }
+
+    private fun unwrapBackupMaster(meta: JSONObject, archiveVersion: Int, code: CharArray): ByteArray {
+        try {
+            val kdf = meta.optString("backupKdf")
+            if (kdf.isNotEmpty()) {
+                if (archiveVersion < 2 || kdf != BackupKeyKdf.ID) throw BackupRejectedException("KDF cadangan tidak didukung.")
+                val salt = meta.getString("backupSalt").unhex()
+                val iv = meta.getString("backupIv").unhex()
+                val wrapped = meta.getString("backupKey").unhex()
+                if (salt.size != 16 || iv.size != 12 || wrapped.size != 48) {
+                    throw BackupRejectedException("Bungkus kunci cadangan tidak valid.")
+                }
+                val derived = BackupKeyKdf.derive(code, salt)
+                return try {
+                    decrypt(derived, iv, wrapped)
+                } catch (_: AEADBadTagException) {
+                    throw InvalidCredentialException("recovery")
+                } finally {
+                    derived.fill(0)
+                }
+            }
+            if (archiveVersion != 1) throw BackupRejectedException("Kunci pemulihan cadangan tidak tersedia.")
+            val salt = meta.getString("recoverySalt").unhex()
+            val iv = meta.getString("recoveryIv").unhex()
+            val wrapped = meta.getString("recoveryKey").unhex()
+            val derived = deriveKey(code, salt)
+            return try {
+                decrypt(derived, iv, wrapped)
+            } catch (_: AEADBadTagException) {
+                throw InvalidCredentialException("recovery")
+            } finally {
+                derived.fill(0)
+            }
+        } catch (error: InvalidCredentialException) {
+            throw error
+        } catch (error: BackupRejectedException) {
+            throw error
+        } catch (error: Exception) {
+            if (error is AEADBadTagException) throw InvalidCredentialException("recovery")
+            throw BackupRejectedException("Metadata kunci pemulihan tidak valid.")
+        } finally {
+            code.fill('\u0000')
+        }
+    }
+
+    private fun verifyStagedIndex(master: ByteArray, directory: File) {
+        val encrypted = File(directory, "index.enc").readBytes()
+        val clear = try {
+            VaultCrypto.decryptCombined(master, encrypted)
+        } catch (_: AEADBadTagException) {
+            throw BackupRejectedException("Kunci cadangan tidak cocok dengan isi brankas.")
+        }
+        try {
+            try {
+                JSONArray(clear.toString(Charsets.UTF_8))
+            } catch (_: Exception) {
+                throw BackupRejectedException("Indeks cadangan tidak valid.")
+            }
+        } finally {
+            clear.fill(0)
+        }
+    }
+
+    private fun verifyRestoredWrapper(metadata: JSONObject, kind: String, secret: CharArray, expectedMaster: ByteArray) {
+        val unwrapped = try {
+            unwrapMetadata(metadata, kind, secret)
+        } catch (error: Exception) {
+            throw BackupRejectedException("Bungkus kunci hasil pemulihan tidak dapat dibuka.").also { it.addSuppressed(error) }
+        }
+        try {
+            if (!MessageDigest.isEqual(expectedMaster, unwrapped)) {
+                throw BackupRejectedException("Bungkus kunci hasil pemulihan tidak cocok.")
+            }
+        } finally {
+            unwrapped.fill(0)
+        }
+    }
+
+    private fun normalizeRecoveryCode(code: CharArray): CharArray {
+        val normalized = code.concatToString().filter { it.isLetterOrDigit() }.uppercase()
+        code.fill('\u0000')
+        if (normalized.length != 40 || normalized.any { it !in '0'..'9' && it !in 'A'..'F' }) {
+            throw InvalidCredentialException("recovery")
+        }
+        return normalized.toCharArray()
+    }
+
+    private fun checkRestoreSession(session: BackupRestoreSession) {
+        check(session.ownerDirectory == filesDir.absolutePath && session.active) { "Sesi pemulihan cadangan sudah tidak berlaku." }
+        check(session.stagingDirectory.isDirectory) { "Data pemulihan sementara tidak tersedia." }
     }
 
     private fun checkPinAttemptDelay(meta: JSONObject) {

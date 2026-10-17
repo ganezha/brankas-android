@@ -4,6 +4,9 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 
 data class ImportProgress(val completed: Int, val total: Int, val current: Int)
@@ -13,6 +16,8 @@ class VaultViewModel(val repository: VaultRepository) : ViewModel() {
     val master = mutableStateOf<ByteArray?>(null)
     val pendingCreation = mutableStateOf<CreatedVault?>(null)
     val recoveryToShow = mutableStateOf<String?>(null)
+    val pendingBackupExport = mutableStateOf<BackupKeyEnvelope?>(null)
+    val pendingBackupRestore = mutableStateOf<BackupRestoreSession?>(null)
     val biometricSetup = mutableStateOf(false)
     val biometricSetupKey = mutableStateOf<ByteArray?>(null)
     val credentialType = mutableStateOf(
@@ -41,9 +46,15 @@ class VaultViewModel(val repository: VaultRepository) : ViewModel() {
         master.value?.fill(0)
         pendingCreation.value?.masterKey?.fill(0)
         biometricSetupKey.value?.fill(0)
+        pendingBackupExport.value?.clear()
+        pendingBackupRestore.value?.let { session ->
+            viewModelScope.launch(Dispatchers.IO) { runCatching { repository.cancelBackupRestore(session) } }
+        }
         master.value = null
         pendingCreation.value = null
         recoveryToShow.value = null
+        pendingBackupExport.value = null
+        pendingBackupRestore.value = null
         biometricSetupKey.value = null
         biometricSetup.value = false
         credentialBusy.value = false

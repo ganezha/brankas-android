@@ -6,12 +6,17 @@ plugins {
 
 android {
     namespace = "id.rumahbrankas.app"
-    compileSdk = 35
+    compileSdk = 36
+
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
 
     defaultConfig {
         applicationId = "id.rumahbrankas.app"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -50,6 +55,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.biometric:biometric:1.1.0")
+    implementation("org.bouncycastle:bcprov-jdk18on:1.86")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     testImplementation("junit:junit:4.13.2")

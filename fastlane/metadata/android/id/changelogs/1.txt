@@ -1,0 +1,1 @@
+Rilis pertama Brankas: brankas offline terenkripsi untuk foto, video, dan catatan. Termasuk cadangan dengan kode pemulihan dan proses pemulihan bertahap yang lebih aman.

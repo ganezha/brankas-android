@@ -231,13 +231,23 @@ class VaultSecurityTest {
             val imported = source.importAndMove(created.masterKey, FakeDocuments(media), SOURCE)
             File(vaultDirectory("backup-source"), "bukan-cadangan.txt").writeText("JANGAN-MASUK-CADANGAN")
             val archive = ByteArrayOutputStream()
-            source.exportBackupTo(archive)
+            val envelope = source.prepareBackupExport(created.masterKey, created.recoveryCode.toCharArray())
+            try {
+                source.exportBackupTo(archive, envelope)
+            } finally {
+                envelope.clear()
+            }
             val bytes = archive.toByteArray()
             assertFalse(containsSequence(bytes, noteBody.toByteArray(Charsets.UTF_8)))
             assertFalse(containsSequence(bytes, "Judul rahasia cadangan".toByteArray(Charsets.UTF_8)))
             assertFalse(containsSequence(bytes, "JANGAN-MASUK-CADANGAN".toByteArray(Charsets.UTF_8)))
             assertFalse(containsSequence(bytes, media))
             assertArrayEquals("BRANKASBK1".toByteArray(Charsets.US_ASCII), bytes.copyOf(10))
+            assertEquals(2, bytes[10].toInt())
+            assertTrue(containsSequence(bytes, BackupKeyKdf.ID.toByteArray(Charsets.US_ASCII)))
+            listOf("pinSalt", "pinIv", "pinKey", "recoverySalt", "recoveryIv", "recoveryKey")
+                .forEach { assertFalse(containsSequence(bytes, it.toByteArray(Charsets.US_ASCII))) }
+            assertFalse(containsSequence(bytes, created.recoveryCode.replace("-", "").toByteArray(Charsets.US_ASCII)))
             assertEquals(noteBody, source.readNote(created.masterKey, note))
 
             val destination = repository("backup-destination")
@@ -247,8 +257,20 @@ class VaultSecurityTest {
             } finally {
                 previous.masterKey.fill(0)
             }
-            destination.restoreBackupFrom(ByteArrayInputStream(bytes))
-            restoredKey = destination.unlock("123456".toCharArray())
+            val restoreSession = destination.prepareBackupRestoreFrom(
+                ByteArrayInputStream(bytes),
+                created.recoveryCode.toCharArray(),
+            )
+            val oldVaultKey = destination.unlock("654321".toCharArray())
+            try {
+                val oldEntries = destination.entries(oldVaultKey)
+                assertEquals("Catatan lama", oldEntries.single().title)
+                assertEquals("harus hilang setelah pulih", destination.readNote(oldVaultKey, oldEntries.single()))
+            } finally {
+                oldVaultKey.fill(0)
+            }
+            destination.completeBackupRestore(restoreSession, "987654".toCharArray())
+            restoredKey = destination.unlock("987654".toCharArray())
             val entries = destination.entries(restoredKey)
             val restoredNote = entries.first { it.isNote }
             assertEquals(note.title, restoredNote.title)
@@ -262,11 +284,93 @@ class VaultSecurityTest {
                 clear.delete()
             }
             assertFalse(File(vaultDirectory("backup-destination"), "bukan-cadangan.txt").exists())
+            assertEquals("pin", destination.credentialType())
+            val recoveryUnlock = destination.unlockWithRecovery(created.recoveryCode.toCharArray())
+            try {
+                assertArrayEquals(restoredKey, recoveryUnlock)
+            } finally {
+                recoveryUnlock.fill(0)
+            }
             assertThrows(Exception::class.java) { destination.unlock("654321".toCharArray()) }
+            assertThrows(Exception::class.java) { destination.unlock("123456".toCharArray()) }
         } finally {
             restoredKey.fill(0)
             created.masterKey.fill(0)
         }
+    }
+
+    @Test
+    fun restoreKeepsPreviousVaultUntilInstalledBackupIsVerified() {
+        val parent = temporaryFolder.newFolder("restore-install-success")
+        val vaultDir = File(parent, "vault").apply { mkdirs() }
+        File(vaultDir, "vault.meta").writeText("old-vault")
+        val staging = File(parent, "vault-restore-test").apply { mkdirs() }
+        File(staging, "vault.meta").writeText("restored-vault")
+        var oldVaultWasKeptForVerification = false
+
+        VaultArchive.install(
+            StagedVaultArchive(staging, 2, JSONObject()),
+            vaultDir,
+            verifyInstalled = { installed ->
+                val previous = parent.listFiles().orEmpty().filter { it.name.startsWith("vault-previous-") }
+                assertEquals(1, previous.size)
+                assertEquals("old-vault", File(previous.single(), "vault.meta").readText())
+                assertEquals("restored-vault", File(installed, "vault.meta").readText())
+                oldVaultWasKeptForVerification = true
+            },
+        )
+
+        assertTrue(oldVaultWasKeptForVerification)
+        assertEquals("restored-vault", File(vaultDir, "vault.meta").readText())
+        assertTrue(parent.listFiles().orEmpty().none { it.name.startsWith("vault-previous-") })
+    }
+
+    @Test
+    fun failedRestoreVerificationRollsBackAndPreservesStagedBackup() {
+        val parent = temporaryFolder.newFolder("restore-install-rollback")
+        val vaultDir = File(parent, "vault").apply { mkdirs() }
+        File(vaultDir, "vault.meta").writeText("old-vault")
+        val staging = File(parent, "vault-restore-test").apply { mkdirs() }
+        File(staging, "vault.meta").writeText("restored-vault")
+
+        assertThrows(IOException::class.java) {
+            VaultArchive.install(
+                StagedVaultArchive(staging, 2, JSONObject()),
+                vaultDir,
+                verifyInstalled = { installed ->
+                    assertEquals("restored-vault", File(installed, "vault.meta").readText())
+                    assertEquals(1, parent.listFiles().orEmpty().count { it.name.startsWith("vault-previous-") })
+                    throw IOException("Simulated post-install verification failure.")
+                },
+            )
+        }
+
+        assertEquals("old-vault", File(vaultDir, "vault.meta").readText())
+        assertEquals("restored-vault", File(staging, "vault.meta").readText())
+        assertTrue(parent.listFiles().orEmpty().none { it.name.startsWith("vault-previous-") })
+    }
+
+    @Test
+    fun failedRestoreMoveRestoresPreviousVault() {
+        val parent = temporaryFolder.newFolder("restore-move-rollback")
+        val vaultDir = File(parent, "vault").apply { mkdirs() }
+        File(vaultDir, "vault.meta").writeText("old-vault")
+        val staging = File(parent, "vault-restore-test").apply { mkdirs() }
+        File(staging, "vault.meta").writeText("restored-vault")
+
+        assertThrows(IOException::class.java) {
+            VaultArchive.install(
+                StagedVaultArchive(staging, 2, JSONObject()),
+                vaultDir,
+                rename = { source, target ->
+                    if (source == staging && target == vaultDir) false else source.renameTo(target)
+                },
+            )
+        }
+
+        assertEquals("old-vault", File(vaultDir, "vault.meta").readText())
+        assertEquals("restored-vault", File(staging, "vault.meta").readText())
+        assertTrue(parent.listFiles().orEmpty().none { it.name.startsWith("vault-previous-") })
     }
 
     @Test
@@ -277,7 +381,12 @@ class VaultSecurityTest {
         try {
             source.addNote(created.masterKey, "Sumber", "isi sumber cadangan")
             val archive = ByteArrayOutputStream()
-            source.exportBackupTo(archive)
+            val envelope = source.prepareBackupExport(created.masterKey, created.recoveryCode.toCharArray())
+            try {
+                source.exportBackupTo(archive, envelope)
+            } finally {
+                envelope.clear()
+            }
             val bytes = archive.toByteArray()
             bytes[bytes.size / 2] = (bytes[bytes.size / 2].toInt() xor 0x5A).toByte()
 
@@ -286,10 +395,10 @@ class VaultSecurityTest {
             val kept = destination.addNote(existing.masterKey, "Tetap ada", "catatan yang tidak boleh hilang")
             existing.masterKey.fill(0)
             assertThrows(BackupRejectedException::class.java) {
-                destination.restoreBackupFrom(ByteArrayInputStream(bytes))
+                destination.prepareBackupRestoreFrom(ByteArrayInputStream(bytes), created.recoveryCode.toCharArray())
             }
             assertThrows(BackupRejectedException::class.java) {
-                destination.restoreBackupFrom(ByteArrayInputStream(byteArrayOf(1, 2, 3, 4)))
+                destination.prepareBackupRestoreFrom(ByteArrayInputStream(byteArrayOf(1, 2, 3, 4)), created.recoveryCode.toCharArray())
             }
             destinationKey = destination.unlock("654321".toCharArray())
             assertEquals(listOf(kept), destination.entries(destinationKey))
@@ -302,10 +411,42 @@ class VaultSecurityTest {
     }
 
     @Test
+    fun wrongBackupRecoveryCodeDoesNotReplaceExistingVault() {
+        val source = repository("backup-wrong-code-source")
+        val created = createVault(source)
+        try {
+            source.addNote(created.masterKey, "Sumber", "isi sumber")
+            val archive = ByteArrayOutputStream()
+            val envelope = source.prepareBackupExport(created.masterKey, created.recoveryCode.toCharArray())
+            try {
+                source.exportBackupTo(archive, envelope)
+            } finally {
+                envelope.clear()
+            }
+
+            val destination = repository("backup-wrong-code-destination")
+            val existing = createVault(destination, "654321")
+            val kept = destination.addNote(existing.masterKey, "Tetap ada", "data perangkat ini tetap")
+            existing.masterKey.fill(0)
+            assertThrows(Exception::class.java) {
+                destination.prepareBackupRestoreFrom(ByteArrayInputStream(archive.toByteArray()), "0".repeat(40).toCharArray())
+            }
+            val destinationKey = destination.unlock("654321".toCharArray())
+            try {
+                assertEquals(listOf(kept), destination.entries(destinationKey))
+            } finally {
+                destinationKey.fill(0)
+            }
+        } finally {
+            created.masterKey.fill(0)
+        }
+    }
+
+    @Test
     fun exportWithoutVaultFails() {
         val repo = repository("backup-empty")
         assertThrows(IllegalStateException::class.java) {
-            repo.exportBackupTo(ByteArrayOutputStream())
+            repo.prepareBackupExport(ByteArray(32), "A".repeat(40).toCharArray())
         }
     }
 

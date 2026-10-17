@@ -1,0 +1,14 @@
+Brankas is a private vault for photos, videos, and notes, stored locally on your device.
+
+Keep personal items in an encrypted vault protected by a PIN or passphrase. You can also enable biometric unlocking on your device.
+
+BACK UP AND RECOVER
+Create an encrypted backup protected with your recovery code. The backup does not contain your PIN. To restore it, enter the recovery code, confirm the backup, and create a new PIN. Brankas verifies the backup before replacing the current vault and keeps the old vault available until the restore succeeds.
+
+PRIVATE BY DESIGN
+• No account required
+• No ads, analytics, or tracking
+• No internet permission; vault data stays on your device
+• Export backups through the Android file picker to a location you choose
+
+Keep your recovery code somewhere safe and separate from your device. It is required to restore a backup if you lose access to your vault.

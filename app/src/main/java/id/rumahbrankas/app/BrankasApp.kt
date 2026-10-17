@@ -124,6 +124,8 @@ internal fun BrankasApp(repo: VaultRepository, activity: FragmentActivity, viewM
     var master by viewModel.master
     var pendingCreation by viewModel.pendingCreation
     var recoveryToShow by viewModel.recoveryToShow
+    var pendingBackupExport by viewModel.pendingBackupExport
+    var pendingBackupRestore by viewModel.pendingBackupRestore
     var biometricSetup by viewModel.biometricSetup
     var biometricSetupKey by viewModel.biometricSetupKey
     var credentialType by viewModel.credentialType
@@ -141,6 +143,16 @@ internal fun BrankasApp(repo: VaultRepository, activity: FragmentActivity, viewM
     var toast by viewModel.message
     var notice by viewModel.notice
     var backgroundLockJob by remember { mutableStateOf<Job?>(null) }
+    var showBackupExportCode by remember { mutableStateOf(false) }
+    var showBackupRestoreCode by remember { mutableStateOf(false) }
+    var showBackupRestoreVerified by remember { mutableStateOf(false) }
+    var showBackupNewPin by remember { mutableStateOf(viewModel.pendingBackupRestore.value != null) }
+    var backupRecoveryCode by remember { mutableStateOf("") }
+    var backupRecoveryError by remember { mutableStateOf("") }
+    var backupRestoreSource by remember { mutableStateOf<String?>(null) }
+    var backupNewPin by remember { mutableStateOf("") }
+    var backupNewPinRepeat by remember { mutableStateOf("") }
+    var backupNewPinError by remember { mutableStateOf("") }
 
     fun unlock(key: ByteArray) {
         if (!isForeground) {
@@ -176,11 +188,27 @@ internal fun BrankasApp(repo: VaultRepository, activity: FragmentActivity, viewM
                 master?.fill(0)
                 pendingCreation?.masterKey?.fill(0)
                 biometricSetupKey?.fill(0)
+                pendingBackupExport?.clear()
+                pendingBackupExport = null
+                pendingBackupRestore?.let { session ->
+                    withContext(Dispatchers.IO) { repo.cancelBackupRestore(session) }
+                }
+                pendingBackupRestore = null
                 master = null
                 pendingCreation = null
                 recoveryToShow = null
                 biometricSetupKey = null
                 biometricSetup = false
+                showBackupExportCode = false
+                showBackupRestoreCode = false
+                showBackupRestoreVerified = false
+                showBackupNewPin = false
+                backupRecoveryCode = ""
+                backupRecoveryError = ""
+                backupRestoreSource = null
+                backupNewPin = ""
+                backupNewPinRepeat = ""
+                backupNewPinError = ""
                 entries.clear()
                 previewCacheCleared = runCatching {
                     withContext(Dispatchers.IO) { repo.clearPreviewCache() }
@@ -285,12 +313,18 @@ internal fun BrankasApp(repo: VaultRepository, activity: FragmentActivity, viewM
 
     val exportPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         viewModel.externalPickerOpen.value = false
-        if (uri == null) return@rememberLauncherForActivityResult
+        val envelope = pendingBackupExport
+        pendingBackupExport = null
+        if (uri == null) {
+            envelope?.clear()
+            return@rememberLauncherForActivityResult
+        }
+        if (envelope == null) return@rememberLauncherForActivityResult
         scope.launch {
             vaultOperations.withLock {
                 notice = context.getString(R.string.backup_working)
                 try {
-                    withContext(Dispatchers.IO) { repo.exportBackup(uri.toString()) }
+                    withContext(Dispatchers.IO) { repo.exportBackup(uri.toString(), envelope) }
                     notice = context.getString(R.string.backup_exported)
                 } catch (cancelled: CancellationException) {
                     notice = ""
@@ -298,6 +332,8 @@ internal fun BrankasApp(repo: VaultRepository, activity: FragmentActivity, viewM
                 } catch (error: Exception) {
                     notice = ""
                     toast = repo.messageForFailure(context.getString(R.string.operation_export_backup), error)
+                } finally {
+                    envelope.clear()
                 }
             }
         }
@@ -305,33 +341,171 @@ internal fun BrankasApp(repo: VaultRepository, activity: FragmentActivity, viewM
     val backupPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         viewModel.externalPickerOpen.value = false
         if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            vaultOperations.withLock {
-                notice = context.getString(R.string.backup_restoring)
-                try {
-                    withContext(Dispatchers.IO) { repo.restoreBackup(uri.toString()) }
-                    viewModel.discardSession()
-                    credentialType = runCatching { repo.credentialType() }.getOrDefault("pin")
-                    notice = context.getString(R.string.backup_restored)
-                } catch (cancelled: CancellationException) {
-                    notice = ""
-                    throw cancelled
-                } catch (error: Exception) {
-                    notice = ""
-                    toast = repo.messageForFailure(context.getString(R.string.operation_restore_backup), error)
-                }
-            }
-        }
+        backupRestoreSource = uri.toString()
+        backupRecoveryCode = ""
+        backupRecoveryError = ""
+        backupNewPin = ""
+        backupNewPinRepeat = ""
+        backupNewPinError = ""
+        showBackupRestoreVerified = false
+        showBackupRestoreCode = true
     }
     fun startBackupExport() {
         if (!repo.exists()) {
             notice = context.getString(R.string.backup_empty)
             return
         }
-        launchExternalPicker { exportPicker.launch("brankas-backup.brankas") }
+        backupRecoveryCode = ""
+        backupRecoveryError = ""
+        showBackupExportCode = true
     }
     fun startBackupRestore() {
         launchExternalPicker { backupPicker.launch(arrayOf("*/*")) }
+    }
+
+    fun cancelBackupExport() {
+        showBackupExportCode = false
+        backupRecoveryCode = ""
+        backupRecoveryError = ""
+        pendingBackupExport?.clear()
+        pendingBackupExport = null
+    }
+
+    fun cancelBackupRestore() {
+        pendingBackupRestore?.let { session ->
+            scope.launch(Dispatchers.IO) { repo.cancelBackupRestore(session) }
+        }
+        pendingBackupRestore = null
+        backupRestoreSource = null
+        showBackupRestoreCode = false
+        showBackupRestoreVerified = false
+        showBackupNewPin = false
+        backupRecoveryCode = ""
+        backupRecoveryError = ""
+        backupNewPin = ""
+        backupNewPinRepeat = ""
+        backupNewPinError = ""
+    }
+
+    fun confirmBackupExportCode() {
+        val operationKey = copiedKeyOrMessage() ?: return
+        val expectedGeneration = keyGeneration
+        val enteredCode = backupRecoveryCode
+        credentialBusy = true
+        backupRecoveryError = ""
+        notice = context.getString(R.string.backup_working)
+        scope.launch {
+            try {
+                val envelope = withContext(Dispatchers.IO) {
+                    repo.prepareBackupExport(operationKey, enteredCode.toCharArray())
+                }
+                if (!isForeground || locking || keyGeneration != expectedGeneration) {
+                    envelope.clear()
+                    toast = context.getString(R.string.status_recovery_discarded)
+                    notice = ""
+                    return@launch
+                }
+                pendingBackupExport?.clear()
+                pendingBackupExport = envelope
+                showBackupExportCode = false
+                backupRecoveryCode = ""
+                notice = ""
+                launchExternalPicker { exportPicker.launch("brankas-backup.brankas") }
+            } catch (cancelled: CancellationException) {
+                notice = ""
+                throw cancelled
+            } catch (error: Exception) {
+                notice = ""
+                if (showBackupExportCode) {
+                    backupRecoveryError = repo.messageForFailure(context.getString(R.string.operation_export_backup), error)
+                } else {
+                    pendingBackupExport?.clear()
+                    pendingBackupExport = null
+                    toast = repo.messageForFailure(context.getString(R.string.operation_export_backup), error)
+                }
+            } finally {
+                operationKey.fill(0)
+                credentialBusy = false
+            }
+        }
+    }
+
+    fun confirmBackupRestoreCode() {
+        val source = backupRestoreSource ?: return
+        val enteredCode = backupRecoveryCode
+        val expectedGeneration = keyGeneration
+        credentialBusy = true
+        backupRecoveryError = ""
+        notice = context.getString(R.string.backup_restoring)
+        scope.launch {
+            try {
+                val session = withContext(Dispatchers.IO) {
+                    repo.prepareBackupRestore(source, enteredCode.toCharArray())
+                }
+                if (!isForeground || locking || keyGeneration != expectedGeneration) {
+                    repo.cancelBackupRestore(session)
+                    notice = ""
+                    toast = context.getString(R.string.status_recovery_discarded)
+                    return@launch
+                }
+                pendingBackupRestore?.let { repo.cancelBackupRestore(it) }
+                pendingBackupRestore = session
+                backupRecoveryCode = ""
+                backupRecoveryError = ""
+                showBackupRestoreCode = false
+                showBackupNewPin = false
+                showBackupRestoreVerified = true
+                notice = ""
+            } catch (cancelled: CancellationException) {
+                notice = ""
+                throw cancelled
+            } catch (error: Exception) {
+                notice = ""
+                backupRecoveryError = repo.messageForFailure(context.getString(R.string.operation_restore_backup), error)
+            } finally {
+                credentialBusy = false
+            }
+        }
+    }
+
+    fun confirmBackupNewPin() {
+        if (backupNewPin.length !in 6..12 || backupNewPin.any { it !in '0'..'9' }) {
+            backupNewPinError = context.getString(R.string.error_pin_format)
+            return
+        }
+        if (backupNewPin != backupNewPinRepeat) {
+            backupNewPinError = context.getString(R.string.error_pin_mismatch)
+            return
+        }
+        val session = pendingBackupRestore ?: return
+        val newPinValue = backupNewPin
+        credentialBusy = true
+        backupNewPinError = ""
+        notice = context.getString(R.string.backup_restoring)
+        scope.launch {
+            try {
+                vaultOperations.withLock {
+                    withContext(Dispatchers.IO) { repo.completeBackupRestore(session, newPinValue.toCharArray()) }
+                }
+                pendingBackupRestore = null
+                showBackupNewPin = false
+                showBackupRestoreVerified = false
+                backupRestoreSource = null
+                backupNewPin = ""
+                backupNewPinRepeat = ""
+                viewModel.discardSession()
+                credentialType = "pin"
+                notice = context.getString(R.string.backup_restored)
+            } catch (cancelled: CancellationException) {
+                notice = ""
+                throw cancelled
+            } catch (error: Exception) {
+                notice = ""
+                backupNewPinError = repo.messageForFailure(context.getString(R.string.operation_restore_backup), error)
+            } finally {
+                credentialBusy = false
+            }
+        }
     }
     LaunchedEffect(notice) {
         val shown = notice
@@ -341,6 +515,18 @@ internal fun BrankasApp(repo: VaultRepository, activity: FragmentActivity, viewM
         if (shown == working || shown == restoring) return@LaunchedEffect
         delay(4_000)
         if (notice == shown) notice = ""
+    }
+    LaunchedEffect(showBackupRestoreVerified, pendingBackupRestore, isForeground, locking, keyGeneration) {
+        val session = pendingBackupRestore
+        if (!showBackupRestoreVerified || session == null || !isForeground || locking) return@LaunchedEffect
+        val expectedGeneration = keyGeneration
+        delay(1_400)
+        if (showBackupRestoreVerified && pendingBackupRestore === session && isForeground && !locking &&
+            keyGeneration == expectedGeneration
+        ) {
+            showBackupRestoreVerified = false
+            showBackupNewPin = true
+        }
     }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -703,6 +889,43 @@ internal fun BrankasApp(repo: VaultRepository, activity: FragmentActivity, viewM
             }
         }
         }
+    }
+    if (showBackupExportCode) {
+        BackupRecoveryCodeDialog(
+            export = true,
+            value = backupRecoveryCode,
+            error = backupRecoveryError,
+            busy = credentialBusy,
+            onValueChange = { backupRecoveryCode = it },
+            onConfirm = ::confirmBackupExportCode,
+            onDismiss = ::cancelBackupExport,
+        )
+    }
+    if (showBackupRestoreCode) {
+        BackupRecoveryCodeDialog(
+            export = false,
+            value = backupRecoveryCode,
+            error = backupRecoveryError,
+            busy = credentialBusy,
+            onValueChange = { backupRecoveryCode = it },
+            onConfirm = ::confirmBackupRestoreCode,
+            onDismiss = ::cancelBackupRestore,
+        )
+    }
+    if (showBackupRestoreVerified) {
+        BackupRestoreVerifiedDialog()
+    }
+    if (showBackupNewPin) {
+        BackupNewPinDialog(
+            pin = backupNewPin,
+            repeatedPin = backupNewPinRepeat,
+            error = backupNewPinError,
+            busy = credentialBusy,
+            onPinChange = { backupNewPin = it },
+            onRepeatedPinChange = { backupNewPinRepeat = it },
+            onConfirm = ::confirmBackupNewPin,
+            onDismiss = ::cancelBackupRestore,
+        )
     }
 }
 

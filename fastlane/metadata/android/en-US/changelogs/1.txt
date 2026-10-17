@@ -1,0 +1,1 @@
+First release of Brankas: an encrypted, offline vault for photos, videos, and notes. Includes recovery-code-protected backups and safer staged restore.
