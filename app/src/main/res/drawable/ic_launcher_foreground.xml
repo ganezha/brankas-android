@@ -1,0 +1,69 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Medallion Charcoal Plate -->
+    <path
+        android:fillColor="#181916"
+        android:pathData="M54,26.5 A27.5,27.5 0 1,0 54,81.5 A27.5,27.5 0 1,0 54,26.5 Z" />
+
+    <!-- Medallion Recessed Groove -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#2E3028"
+        android:strokeWidth="1.2"
+        android:pathData="M54,32 A22,22 0 1,0 54,76 A22,22 0 1,0 54,32 Z" />
+
+    <!-- Outer Gold Medallion Ring -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#D3BD82"
+        android:strokeWidth="2.2"
+        android:pathData="M54,23 A31,31 0 1,0 54,85 A31,31 0 1,0 54,23 Z" />
+
+    <!-- Inner Gold Bevel Ring -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#B8A26A"
+        android:strokeWidth="0.8"
+        android:pathData="M54,26.5 A27.5,27.5 0 1,0 54,81.5 A27.5,27.5 0 1,0 54,26.5 Z" />
+
+    <!-- 4 Corner Rivets at 45°, 135°, 225°, 315° -->
+    <path
+        android:fillColor="#D3BD82"
+        android:pathData="M74.65,73.45 A1.2,1.2 0 1,0 74.65,75.85 A1.2,1.2 0 1,0 74.65,73.45 Z" />
+    <path
+        android:fillColor="#D3BD82"
+        android:pathData="M33.35,73.45 A1.2,1.2 0 1,0 33.35,75.85 A1.2,1.2 0 1,0 33.35,73.45 Z" />
+    <path
+        android:fillColor="#D3BD82"
+        android:pathData="M33.35,32.15 A1.2,1.2 0 1,0 33.35,34.55 A1.2,1.2 0 1,0 33.35,32.15 Z" />
+    <path
+        android:fillColor="#D3BD82"
+        android:pathData="M74.65,32.15 A1.2,1.2 0 1,0 74.65,34.55 A1.2,1.2 0 1,0 74.65,32.15 Z" />
+
+    <!-- Horizontal Precision Lock Alignment Marks -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#D3BD82"
+        android:strokeWidth="1.2"
+        android:strokeLineCap="round"
+        android:pathData="M42,54 H46 M62,54 H66" />
+
+    <!-- Bold Vault Keyhole Emblem (Solid Gold) -->
+    <path
+        android:fillColor="#D3BD82"
+        android:pathData="M51,52.8 A7,7 0 1,1 57,52.8 L58.5,65 A1.5,1.5 0 0,1 57,66.5 H51 A1.5,1.5 0 0,1 49.5,65 Z" />
+
+    <!-- Inner Keyhole Core Recess (Charcoal) -->
+    <path
+        android:fillColor="#181916"
+        android:pathData="M54,46.5 A2.5,2.5 0 1,0 54,51.5 A2.5,2.5 0 1,0 54,46.5 Z" />
+
+    <!-- Core Pin (White-Gold Highlight) -->
+    <path
+        android:fillColor="#F7ECC8"
+        android:pathData="M54,48 A1,1 0 1,0 54,50 A1,1 0 1,0 54,48 Z" />
+</vector>

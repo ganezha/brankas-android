@@ -3,45 +3,52 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <group
-        android:pivotX="54"
-        android:pivotY="54"
-        android:scaleX="0.9"
-        android:scaleY="0.9">
-        <path
-            android:fillColor="#00000000"
-            android:strokeColor="#FFFFFFFF"
-            android:strokeWidth="4.6"
-            android:strokeLineCap="square"
-            android:strokeLineJoin="round"
-            android:pathData="M40.8,39.7 L40.8,33.8 A13.2,13.2 0,0 1,67.2 33.8 L67.2,39.7" />
-        <path
-            android:fillColor="#FFFFFFFF"
-            android:fillType="evenOdd"
-            android:pathData="M41,39.6 H67 C70.2,39.6 72.3,42.1 72.3,45.2 V64.5 C72.3,67.7 70.2,70 67,70 H41 C37.8,70 35.7,67.7 35.7,64.5 V45.2 C35.7,42.1 37.8,39.6 41,39.6 Z M54,47.4 C51.8,47.4 50,49.2 50,51.4 C50,53.5 51.4,55.1 53.3,55.4 L50.8,62.5 C50.5,63.2 51,63.7 51.7,63.7 H56.3 C57,63.7 57.5,63.2 57.2,62.5 L54.7,55.4 C56.6,55.1 58,53.5 58,51.4 C58,49.2 56.2,47.4 54,47.4 Z" />
-        <path
-            android:fillColor="#00000000"
-            android:strokeColor="#FFFFFFFF"
-            android:strokeWidth="1.8"
-            android:strokeLineCap="square"
-            android:strokeLineJoin="round"
-            android:pathData="M34.7,58.8 H28 L23.7,63.2 V67.3 M73.3,58.8 H80 L84.3,63.2 V67.3" />
-        <path
-            android:fillColor="#00000000"
-            android:strokeColor="#FFFFFFFF"
-            android:strokeWidth="1.8"
-            android:strokeLineCap="square"
-            android:strokeLineJoin="round"
-            android:pathData="M23.7,67.3 L29.3,70.5 L23.7,73.7 L18.5,70.6 Z M18.5,70.6 V76.1 L23.7,79.2 V73.7 M23.7,73.7 L29.3,70.5 V76.1 L23.7,79.2 M84.3,67.3 L89.5,70.6 L84.3,73.7 L78.7,70.5 Z M78.7,70.5 V76.1 L84.3,79.2 V73.7 M84.3,73.7 L89.5,70.6 V76.1 L84.3,79.2" />
-        <path
-            android:fillColor="#00000000"
-            android:strokeColor="#FFFFFFFF"
-            android:strokeWidth="1.8"
-            android:strokeLineCap="square"
-            android:strokeLineJoin="round"
-            android:pathData="M54,71.2 V73.6 M50.7,80.2 L44.1,84.7 M57.3,80.2 L63.9,84.7" />
-        <path
-            android:fillColor="#FFFFFFFF"
-            android:pathData="M57.3,77.7 A3.3,3.3 0,1 1,50.7 77.7 A3.3,3.3 0,1 1,57.3 77.7 Z M44.2,85.6 A2.7,2.7 0,1 1,38.8 85.6 A2.7,2.7 0,1 1,44.2 85.6 Z M69,85.6 A2.7,2.7 0,1 1,63.6 85.6 A2.7,2.7 0,1 1,69 85.6 Z" />
-    </group>
+
+    <!-- Outer Medallion Ring -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.2"
+        android:pathData="M54,23 A31,31 0 1,0 54,85 A31,31 0 1,0 54,23 Z" />
+
+    <!-- Inner Bevel Ring -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="0.8"
+        android:pathData="M54,26.5 A27.5,27.5 0 1,0 54,81.5 A27.5,27.5 0 1,0 54,26.5 Z" />
+
+    <!-- 4 Corner Rivets -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M74.65,73.45 A1.2,1.2 0 1,0 74.65,75.85 A1.2,1.2 0 1,0 74.65,73.45 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M33.35,73.45 A1.2,1.2 0 1,0 33.35,75.85 A1.2,1.2 0 1,0 33.35,73.45 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M33.35,32.15 A1.2,1.2 0 1,0 33.35,34.55 A1.2,1.2 0 1,0 33.35,32.15 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M74.65,32.15 A1.2,1.2 0 1,0 74.65,34.55 A1.2,1.2 0 1,0 74.65,32.15 Z" />
+
+    <!-- Horizontal Precision Lock Alignment Marks -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.2"
+        android:strokeLineCap="round"
+        android:pathData="M42,54 H46 M62,54 H66" />
+
+    <!-- Vault Keyhole Silhouette -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M51,52.8 A7,7 0 1,1 57,52.8 L58.5,65 A1.5,1.5 0 0,1 57,66.5 H51 A1.5,1.5 0 0,1 49.5,65 Z" />
+
+    <!-- Center Keyhole Core Cutout -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.0"
+        android:pathData="M54,46.5 A2.5,2.5 0 1,0 54,51.5 A2.5,2.5 0 1,0 54,46.5 Z" />
 </vector>
